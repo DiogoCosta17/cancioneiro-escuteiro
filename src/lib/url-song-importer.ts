@@ -118,11 +118,23 @@ function autoStructureStanzas(chordProText: string): string {
     '$1\n'
   );
 
-  const blocks = preSplitText
+  const rawBlocks = preSplitText
     .replace(/\r\n/g, '\n')
     .split(/\n{2,}/)
     .map((b) => b.trim())
     .filter(Boolean);
+
+  // Uma etiqueta sozinha ("Intro:" seguido de linha em branco, como no LaCuerda) pertence ao bloco seguinte
+  const blocks: string[] = [];
+  for (let i = 0; i < rawBlocks.length; i++) {
+    const next = rawBlocks[i + 1];
+    if (/^\{[^}]+\}$/.test(rawBlocks[i]) && next && !/^\{[^}]+\}/.test(next)) {
+      blocks.push(`${rawBlocks[i]}\n${next}`);
+      i++;
+    } else {
+      blocks.push(rawBlocks[i]);
+    }
+  }
 
   if (blocks.length <= 1) return chordProText;
 
@@ -178,80 +190,204 @@ function autoStructureStanzas(chordProText: string): string {
   return structuredBlocks.join('\n\n');
 }
 
-/**
- * Extrai música e metadados diretamente de uma página HTML (CifraClub, Ultimate Guitar,
- * Cifras.com.br, LaCuerda, Letras, Cancioneiros HTML, blogs, etc.).
- */
-export function extractSongFromHtml(html: string, _sourceUrl: string = ''): {
+export type ExtractionMethod = 'ultimate-guitar' | 'pre-monospace' | 'dom-structured';
+
+export interface ExtractedSong {
   title: string;
   artist: string;
   key: string;
   capo: number | null;
   youtubeUrl: string;
   chordProContent: string;
-  extractionMethod: 'ultimate-guitar' | 'pre-monospace' | 'dom-structured';
-} {
+  extractionMethod: ExtractionMethod;
+  /** Preenchido quando a página é válida mas não tem texto importável (ex.: tab "Pro" do Ultimate Guitar). */
+  unsupportedReason?: string;
+}
+
+// Tipos de tab do Ultimate Guitar que são interativos (Guitar Pro, vídeo...) e não têm letra/acordes em texto
+const UG_TEXTLESS_TAB_TYPES = /^(?:pro|power|official|video|guitar\s*pro)$/i;
+
+// Sufixos que os sites acrescentam ao título ("Wonderwall Chords", "Hino (ver 2)", "Música (Cifra)")
+const TITLE_TYPE_SUFFIX_RE =
+  /\s+(?:official\s+)?(?:chords|tabs?|ukulele\s+chords|bass\s+tabs?|drum\s+tabs?|guitar\s+pro)(?:\s*\(ver\s*\d+\))?\s*$/i;
+
+function cleanSongTitle(raw: string): string {
+  return raw
+    .replace(/\s*\((?:cifra|acordes|letra)[^)]*\)\s*$/i, '')
+    .replace(/\s*\(ver\s*\d+\)\s*$/i, '')
+    .replace(TITLE_TYPE_SUFFIX_RE, '')
+    .trim();
+}
+
+function parseCapo(raw: unknown): number | null {
+  const n = parseInt(String(raw ?? ''), 10);
+  return n > 0 && n <= 12 ? n : null;
+}
+
+/** Lê o valor de um campo string de JSON embutido (`"campo":"valor com \"escapes\""`). */
+function readJsonStringField(source: string, field: string): string {
+  const m = source.match(new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+  return m ? parseJsonStringLiteral(m[1]).trim() : '';
+}
+
+/** Interpreta o corpo de uma string JSON (sem aspas), tolerando quebras de linha literais. */
+function parseJsonStringLiteral(body: string): string {
+  try {
+    const safe = body.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+    return String(JSON.parse(`"${safe}"`));
+  } catch {
+    return '';
+  }
+}
+
+/** Converte texto "acordes por cima da letra" num ChordPro estruturado e limpo. */
+function textToChordPro(rawText: string): { content: string; detectedCapo: number | null; detectedKey: string } {
+  // Caracteres invisíveis (zero-width space no CifraClub) impedem o reconhecimento de "[Intro]" e acordes
+  const visibleText = rawText.replace(/[​-‍⁠﻿]/g, '');
+  const { cleanedText, detectedCapo, detectedKey } = stripTablatureAndFooters(visibleText);
+  const withSections = normalizeSectionHeaders(cleanedText);
+  const converted = convertToChordPro(withSections);
+  const structured = autoStructureStanzas(converted);
+  return { content: cleanAndAlignChordPro(structured), detectedCapo, detectedKey };
+}
+
+/**
+ * Deteta páginas de bloqueio anti-robô (Cloudflare "Just a moment...", captchas, "Access denied")
+ * que alguns proxies devolvem com estado 200 em vez da página verdadeira.
+ */
+export function looksLikeBlockedPage(html: string): boolean {
+  const head = html.slice(0, 30000);
+  const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || '';
+  if (
+    /^(?:just a (?:moment|second)|attention required|access denied|please wait|checking your browser|verify(?:ing)? you are (?:a )?human|security check|one more step|(?:403\s*)?forbidden|are you a robot|captcha|ddos-guard)/i.test(
+      title
+    )
+  ) {
+    return true;
+  }
+  return /cf_chl_opt|cf-browser-verification|Enable JavaScript and cookies to continue|captcha-delivery\.com|Checking if the site connection is secure/i.test(
+    html.slice(0, 300000)
+  );
+}
+
+/**
+ * Ultimate Guitar: a cifra vem em JSON (`wiki_tab.content`, com acordes marcados por [ch]..[/ch]).
+ * Lê-o do atributo `data-content` da div `.js-store` ou, se não existir (página renderizada por um proxy,
+ * JSON dentro de <script>), procura os campos diretamente no código-fonte.
+ */
+function extractUltimateGuitar(html: string, doc: Document): ExtractedSong | null {
+  let title = '';
+  let artist = '';
+  let rawKey = '';
+  let capo: number | null = null;
+  let tabType = '';
+  let wikiContent = '';
+  let foundUgData = false;
+
+  // A) <div class="js-store" data-content="{...}">. O DOMParser decodifica as entidades do atributo,
+  //    ao contrário de uma regex, que cortava o JSON no primeiro apóstrofo (ex.: "don't").
+  const storeAttr = doc.querySelector('.js-store[data-content]')?.getAttribute('data-content') || '';
+  if (storeAttr) {
+    try {
+      const store = JSON.parse(storeAttr);
+      const data = store?.store?.page?.data ?? store?.page?.data ?? {};
+      const tab = data?.tab ?? {};
+      const tabView = data?.tab_view ?? {};
+      foundUgData = !!(data?.tab || data?.tab_view);
+      wikiContent = String(tabView?.wiki_tab?.content || '');
+      title = String(tab.song_name || '').trim();
+      artist = String(tab.artist_name || '').trim();
+      rawKey = String(tab.tonality_name || tabView?.meta?.tonality || '').trim();
+      capo = parseCapo(tab.capo ?? tabView?.meta?.capo);
+      tabType = String(tab.type || tab.type_name || '').trim();
+    } catch (e) {
+      console.warn('Falha ao ler JSON do Ultimate Guitar (js-store), a tentar outras estratégias:', e);
+    }
+  }
+
+  // B) JSON embutido noutro sítio: procurar os campos diretamente no código-fonte
+  if (!wikiContent && /wiki_tab|\[ch\]|\[\/ch\]|&quot;song_name|"song_name/.test(html)) {
+    const decoded = html.includes('&quot;') ? decodeHtmlEntities(html) : html;
+    const wikiMatch =
+      decoded.match(/"wiki_tab"\s*:\s*\{[^{}]*?"content"\s*:\s*"((?:[^"\\]|\\.)*)"/) ||
+      decoded.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*?\[ch\](?:[^"\\]|\\.)*)"/);
+    if (wikiMatch) {
+      wikiContent = parseJsonStringLiteral(wikiMatch[1]);
+    }
+    if (wikiContent || /"song_name"\s*:/.test(decoded)) {
+      foundUgData = true;
+      title = title || readJsonStringField(decoded, 'song_name');
+      artist = artist || readJsonStringField(decoded, 'artist_name');
+      rawKey = rawKey || readJsonStringField(decoded, 'tonality_name');
+      capo = capo ?? parseCapo(decoded.match(/"capo"\s*:\s*"?(\d+)/)?.[1]);
+      // O campo "type" não é lido aqui: é demasiado genérico fora do js-store e daria falsos positivos.
+    }
+  }
+
+  if (!wikiContent.trim()) {
+    if (foundUgData && UG_TEXTLESS_TAB_TYPES.test(tabType)) {
+      return {
+        title,
+        artist,
+        key: '',
+        capo,
+        youtubeUrl: '',
+        chordProContent: '',
+        extractionMethod: 'ultimate-guitar',
+        unsupportedReason: `Este link do Ultimate Guitar é uma tab do tipo "${tabType}" (formato interativo, sem letra em texto). Escolhe uma versão "Chords" ou "Tabs" da mesma música e cola esse link.`,
+      };
+    }
+    return null;
+  }
+
+  const cleanedUg = wikiContent
+    .replace(/\r\n?/g, '\n')
+    .replace(/\[\/?tab\]/gi, '')
+    .replace(/\[ch\]([^[]*?)\[\/ch\]/gi, '$1');
+
+  const { content, detectedCapo, detectedKey } = textToChordPro(cleanedUg);
+  if (!capo && detectedCapo) capo = detectedCapo;
+  if (!rawKey && detectedKey) rawKey = detectedKey;
+
+  // Artistas genéricos do UG ("Misc Originals", "Misc Praise Songs"...): o autor real vem no
+  // nome da música ("Nome do Autor - Nome da Música")
+  if (/^misc\b/i.test(artist)) {
+    const parts = title.split(/\s+[-–—]\s+/);
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      artist = parts[0].trim();
+      title = parts[1].trim();
+    }
+  }
+
+  return {
+    title: cleanSongTitle(title),
+    artist,
+    key: normalizeDetectedKey(rawKey, content),
+    capo,
+    youtubeUrl: '',
+    chordProContent: content,
+    extractionMethod: 'ultimate-guitar',
+  };
+}
+
+/**
+ * Extrai música e metadados diretamente de uma página HTML (CifraClub, Ultimate Guitar,
+ * Cifras.com.br, LaCuerda, Letras, Cancioneiros HTML, blogs, etc.).
+ */
+export function extractSongFromHtml(html: string, _sourceUrl: string = ''): ExtractedSong {
   let title = '';
   let artist = '';
   let rawKey = '';
   let capo: number | null = null;
   let youtubeUrl = '';
 
-  // 1. Verificar formato Ultimate Guitar (<div class="js-store" data-content="...">)
-  const ugMatch = html.match(/class=["']js-store["'][^>]*data-content=["']([^"']+)["']/i);
-  if (ugMatch) {
-    try {
-      const jsonStr = decodeHtmlEntities(ugMatch[1]);
-      const store = JSON.parse(jsonStr);
-      const tab = store?.store?.page?.data?.tab;
-      const tabView = store?.store?.page?.data?.tab_view;
-      const wikiContent: string = tabView?.wiki_tab?.content || '';
+  const doc = new DOMParser().parseFromString(html, 'text/html');
 
-      if (tab?.song_name) title = String(tab.song_name).trim();
-      if (tab?.artist_name) artist = String(tab.artist_name).trim();
-      if (tab?.tonality_name) rawKey = String(tab.tonality_name).trim();
-      if (tabView?.meta?.tonality) rawKey = rawKey || String(tabView.meta.tonality).trim();
-      const rawUgCapo = tab?.capo ?? tabView?.meta?.capo;
-      if (rawUgCapo) {
-        const parsedCapo = parseInt(String(rawUgCapo), 10);
-        if (parsedCapo > 0 && parsedCapo <= 12) capo = parsedCapo;
-      }
-
-      if (wikiContent) {
-        const cleanedUg = wikiContent
-          .replace(/\r\n/g, '\n')
-          .replace(/\[tab\]/gi, '')
-          .replace(/\[\/tab\]/gi, '')
-          .replace(/\[ch\]([^[]+?)\[\/ch\]/gi, '$1');
-
-        const { cleanedText, detectedCapo, detectedKey } = stripTablatureAndFooters(cleanedUg);
-        if (!capo && detectedCapo) capo = detectedCapo;
-        if (!rawKey && detectedKey) rawKey = detectedKey;
-
-        const withSections = normalizeSectionHeaders(cleanedText);
-        const converted = convertToChordPro(withSections);
-        const structured = autoStructureStanzas(converted);
-        const polished = cleanAndAlignChordPro(structured);
-
-        return {
-          title,
-          artist,
-          key: normalizeDetectedKey(rawKey, polished),
-          capo,
-          youtubeUrl,
-          chordProContent: polished,
-          extractionMethod: 'ultimate-guitar',
-        };
-      }
-    } catch (e) {
-      console.warn('Falha ao ler JSON do Ultimate Guitar, a continuar com parser HTML:', e);
-    }
-  }
+  // 1. Ultimate Guitar (JSON estruturado)
+  const ug = extractUltimateGuitar(html, doc);
+  if (ug) return ug;
 
   // 2. Parser DOM geral
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-
   // Remover elementos de acessibilidade invisíveis (ex: <h2 class="u-srOnly">Menu principal</h2> no CifraClub)
   doc.querySelectorAll('.u-srOnly, [class*="srOnly"], [class*="sr-only"], [aria-hidden="true"]').forEach((el) => el.remove());
 
@@ -280,23 +416,30 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): {
   const h1Title = doc.querySelector('h1.t1, .cifra_header h1, h1[itemprop="name"], main h1, article h1, h1')?.textContent?.trim();
   const h2Artist = doc.querySelector('h2.t3 a, h2.t3, .cifra_header h2, h2[itemprop="byArtist"], [itemprop="byArtist"], h1 + h2, h2')?.textContent?.trim();
 
-  if (h1Title) title = h1Title;
+  if (h1Title) title = cleanSongTitle(h1Title);
   if (h2Artist && !/^menu|vers[oõ]es|todos\s+artistas/i.test(h2Artist)) {
     artist = h2Artist;
   }
 
   const ogTitle = doc.querySelector('meta[property="og:title"]')?.getAttribute('content')?.trim() || doc.title || '';
   if (ogTitle) {
-    // Limpar sufixos típicos de sites ("Música - Artista - Cifra Club", "Música Chords by Artista")
+    // Limpar sufixos típicos de sites ("Música - Artista - Cifra Club", "MÚSICA CHORDS by Artista @ Ultimate-Guitar.Com")
     const cleanedTitle = ogTitle
-      .replace(/\s*[-|–—]\s*(?:Cifra\s*Club|Cifras\.com\.br|Ultimate[- ]Guitar\.com|LaCuerda\.net|Letras\.mus\.br).*$/i, '')
+      .replace(/\s*@\s*Ultimate[- ]Guitar(?:\.com)?.*$/i, '')
+      .replace(/\s*[-|–—]\s*(?:Cifra\s*Club|Cifras\.com\.br|Ultimate[- ]Guitar\.com|LaCuerda\.net|Letras\.mus\.br|E-Chords).*$/i, '')
       .trim();
+    const byMatch = cleanedTitle.match(
+      /^(.+?)\s+(?:official\s+)?(?:chords|tabs?|ukulele\s+chords|bass\s+tabs?|acordes|cifra)(?:\s*\(ver\s*\d+\))?\s+(?:by|de|por)\s+(.+)$/i
+    );
     const parts = cleanedTitle.split(/\s+[-–—]\s+/);
-    if (parts.length >= 2) {
-      if (!title) title = parts[0].trim();
+    if (byMatch) {
+      if (!title) title = byMatch[1].trim();
+      if (!artist) artist = byMatch[2].trim();
+    } else if (parts.length >= 2) {
+      if (!title) title = cleanSongTitle(parts[0]);
       if (!artist) artist = parts[1].replace(/\s*\(cifra.*?\)/i, '').trim();
     } else if (!title) {
-      title = cleanedTitle;
+      title = cleanSongTitle(cleanedTitle);
     }
   }
 
@@ -308,14 +451,11 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): {
   const capoEl = doc.querySelector('#cifra_capo, .cifra-capo, [data-cy="song-capo"]');
   if (capoEl?.textContent) {
     const m = capoEl.textContent.match(/(\d+)/);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (n > 0 && n <= 12) capo = n;
-    }
+    if (m) capo = parseCapo(m[1]) ?? capo;
   }
 
-  // 3. Verificar blocos <pre> (CifraClub, Cifras.com.br, LaCuerda, E-Chords, Cancioneiros)
-  const preElements = Array.from(doc.querySelectorAll('pre'));
+  // 3. Verificar blocos <pre> (CifraClub, Cifras.com.br, LaCuerda, E-Chords, Cancioneiros, UG renderizado)
+  const preElements = Array.from(doc.querySelectorAll('pre')).filter((el) => (el.textContent || '').trim().length > 0);
   if (preElements.length > 0) {
     // Escolher o <pre> com maior conteúdo musical
     const bestPre = preElements.reduce((best, el) =>
@@ -325,29 +465,28 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): {
     // Converter <br> e </div> em \n preservando linhas em branco após </div>
     const preHtml = bestPre.innerHTML
       .replace(/\r\n/g, '\n')
+      // <div></div> vazios (LaCuerda) não são quebras de linha
+      .replace(/<(div|p|span)\b[^>]*><\/\1>/gi, '')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/\n?<\/(?:div|p|li)>/gi, '\n')
       .replace(/<[^>]+>/g, '');
     const rawPreText = decodeHtmlEntities(preHtml);
 
-    const { cleanedText, detectedCapo, detectedKey } = stripTablatureAndFooters(rawPreText);
+    const { content, detectedCapo, detectedKey } = textToChordPro(rawPreText);
     if (!capo && detectedCapo) capo = detectedCapo;
     if (!rawKey && detectedKey) rawKey = detectedKey;
 
-    const withSections = normalizeSectionHeaders(cleanedText);
-    const converted = convertToChordPro(withSections);
-    const structured = autoStructureStanzas(converted);
-    const polished = cleanAndAlignChordPro(structured);
-
-    return {
-      title,
-      artist,
-      key: normalizeDetectedKey(rawKey, polished),
-      capo,
-      youtubeUrl,
-      chordProContent: polished,
-      extractionMethod: 'pre-monospace',
-    };
+    if (content.trim().length >= 15) {
+      return {
+        title,
+        artist,
+        key: normalizeDetectedKey(rawKey, content),
+        capo,
+        youtubeUrl,
+        chordProContent: content,
+        extractionMethod: 'pre-monospace',
+      };
+    }
   }
 
   // 4. Páginas HTML gerais / Blogs / Cancioneiros sem <pre> (incluindo fallback se vier em formato Markdown)
@@ -380,95 +519,146 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): {
       .replace(/\*\*([A-G][#b♯♭]?(?:m|maj|min|dim|aug|sus|add|[0-9/+()-])*)\*\*/g, '[$1]');
   }
 
-  const { cleanedText, detectedCapo, detectedKey } = stripTablatureAndFooters(rawBodyText);
+  const { content, detectedCapo, detectedKey } = textToChordPro(rawBodyText);
   if (!capo && detectedCapo) capo = detectedCapo;
   if (!rawKey && detectedKey) rawKey = detectedKey;
-
-  const withSections = normalizeSectionHeaders(cleanedText);
-  const converted = convertToChordPro(withSections);
-  const structured = autoStructureStanzas(converted);
-  const polished = cleanAndAlignChordPro(structured);
 
   return {
     title,
     artist,
-    key: normalizeDetectedKey(rawKey, polished),
+    key: normalizeDetectedKey(rawKey, content),
     capo,
     youtubeUrl,
-    chordProContent: polished,
+    chordProContent: content,
     extractionMethod: 'dom-structured',
   };
 }
 
-/**
- * Descarrega o código-fonte HTML de um URL público usando Jina HTML Reader (que suporta CORS e ultrapassa Cloudflare 522),
- * Edge Function e proxies de fallback.
- */
-async function fetchWebpageHtml(targetUrl: string): Promise<string> {
-  // 1. Tentar Jina Reader em modo HTML puro ('X-Return-Format': 'html') — rápido (~1s), CORS ativo e preserva <pre>
+/** Uma extração é "forte" quando veio de dados estruturados/monoespaçados e tem acordes reconhecidos. */
+function isStrongExtraction(ex: ExtractedSong): boolean {
+  return (
+    ex.extractionMethod !== 'dom-structured' &&
+    ex.chordProContent.trim().length >= 15 &&
+    /\[[^\]\n]+\]/.test(ex.chordProContent)
+  );
+}
+
+async function fetchTextWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<string | null> {
   // O timeout só é limpo depois de ler o corpo (res.text() também pode ficar pendurado)
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`https://r.jina.ai/${targetUrl}`, {
-      headers: {
-        'X-Return-Format': 'html',
-      },
-      signal: controller.signal,
-    });
-    if (res.ok) {
-      const html = await res.text();
-      if (html && html.trim().length > 100 && /<[a-z][\s\S]*>/i.test(html)) {
-        return html;
-      }
-    }
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    if (!res.ok) return null;
+    return await res.text();
   } catch {
-    // Continua para Edge Function / outros proxies
+    return null;
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  // 2. Tentar via Supabase Edge Function (se suportar fetch-url)
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.functions.invoke('gemini-vision', {
-        body: { action: 'fetch-url', targetUrl },
-      });
-      if (!error && data?.html && typeof data.html === 'string' && data.html.length > 100) {
-        return data.html;
+/**
+ * Fontes para obter o código-fonte de um URL público. Cada site bloqueia fontes diferentes
+ * (ex.: o Ultimate Guitar recusa muitos IPs de servidores), por isso usam-se várias em paralelo.
+ */
+function buildHtmlSources(targetUrl: string): Array<() => Promise<string | null>> {
+  return [
+    // Jina Reader em modo HTML: executa o JavaScript da página (sites SPA) e tem CORS ativo
+    () => fetchTextWithTimeout(`https://r.jina.ai/${targetUrl}`, { headers: { 'X-Return-Format': 'html' } }, 20000),
+    // Edge Function própria (só para administradores autenticados): código-fonte original, sem CORS
+    async () => {
+      if (!supabase) return null;
+      try {
+        const { data, error } = await supabase.functions.invoke('gemini-vision', {
+          body: { action: 'fetch-url', targetUrl },
+        });
+        return !error && typeof data?.html === 'string' ? data.html : null;
+      } catch {
+        return null;
       }
-    } catch {
-      // Continua para os proxies CORS de cliente
-    }
-  }
-
-  // 3. Outros proxies CORS públicos de fallback
-  const proxies = [
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+    },
+    // Proxies CORS públicos
+    () => fetchTextWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, {}, 15000),
+    () => fetchTextWithTimeout(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, {}, 15000),
   ];
+}
 
-  let lastErr: Error | null = null;
-  for (const proxyUrl of proxies) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(proxyUrl, { signal: controller.signal });
+/**
+ * Descarrega a página por todas as fontes em paralelo e devolve a primeira extração válida.
+ * Respostas de bloqueio (Cloudflare, captcha) ou sem música são ignoradas em vez de interromperem
+ * a importação. Se nenhuma fonte der dados estruturados, fica a melhor extração genérica.
+ */
+export async function fetchAndExtractSong(targetUrl: string): Promise<ExtractedSong> {
+  const sources = buildHtmlSources(targetUrl);
+  let gotAnyPage = false;
+  let gotBlockedPage = false;
+  let bestWeak: ExtractedSong | null = null;
 
-      if (res.ok) {
-        const text = await res.text();
-        if (text && text.trim().length > 80) {
-          return text;
-        }
+  return new Promise<ExtractedSong>((resolve, reject) => {
+    let pending = sources.length;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (bestWeak) {
+        resolve(bestWeak);
+      } else if (gotBlockedPage) {
+        reject(
+          new Error(
+            'Este site bloqueou a leitura automática (proteção anti-robô). Tira um print da cifra e usa a opção "Foto / Print" abaixo.'
+          )
+        );
+      } else if (gotAnyPage) {
+        reject(new Error('Não foi possível encontrar letra ou acordes nesta página.'));
+      } else {
+        reject(new Error('Não foi possível aceder ao link indicado. Verifica se o endereço está correto e é público.'));
       }
-    } catch (err: any) {
-      lastErr = err;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
+    };
 
-  throw lastErr || new Error('Não foi possível aceder ao link indicado. Verifica se o endereço é público.');
+    for (const load of sources) {
+      load()
+        .then((html) => {
+          if (settled || !html || html.trim().length < 80) return;
+          gotAnyPage = true;
+          if (looksLikeBlockedPage(html)) {
+            gotBlockedPage = true;
+            return;
+          }
+          let extracted: ExtractedSong;
+          try {
+            extracted = extractSongFromHtml(html, targetUrl);
+          } catch (err) {
+            console.warn('Falha a extrair a música da página:', err);
+            return;
+          }
+          if (extracted.unsupportedReason) {
+            settled = true;
+            reject(new Error(extracted.unsupportedReason));
+            return;
+          }
+          if (isStrongExtraction(extracted)) {
+            settled = true;
+            resolve(extracted);
+            return;
+          }
+          if (
+            extracted.chordProContent.trim().length >= 15 &&
+            extracted.chordProContent.length > (bestWeak?.chordProContent.length || 0)
+          ) {
+            bestWeak = extracted;
+          }
+        })
+        .catch(() => {
+          // Fonte falhou: as outras continuam
+        })
+        .finally(() => {
+          pending -= 1;
+          if (pending === 0) finish();
+        });
+    }
+  });
 }
 
 /**
@@ -476,7 +666,7 @@ async function fetchWebpageHtml(targetUrl: string): Promise<string> {
  * preservando rigorosamente as posições de acordes já alinhadas.
  */
 async function polishExtractedSongWithAi(
-  extracted: ReturnType<typeof extractSongFromHtml>,
+  extracted: ExtractedSong,
   sourceUrl: string
 ): Promise<UrlImportResult> {
   const prompt = `You are a music transcription and ChordPro formatting specialist.
@@ -610,14 +800,9 @@ export async function importSongFromUrl(
   }
 
   if (onProgress) onProgress('Passo 1/2: A ler o código-fonte da página...');
-  const html = await fetchWebpageHtml(trimmedUrl);
+  const extracted = await fetchAndExtractSong(trimmedUrl);
 
   if (onProgress) onProgress('Passo 2/2: A extrair acordes, letra, tom e estrutura para ChordPro...');
-  const extracted = extractSongFromHtml(html, trimmedUrl);
-
-  if (!extracted.chordProContent || extracted.chordProContent.trim().length < 15) {
-    throw new Error('Não foi possível encontrar letra ou acordes nesta página.');
-  }
 
   // Quando a página tem um bloco <pre> monoespaçado (CifraClub, Cifras, LaCuerda, E-Chords, Cancioneiros)
   // ou JSON estruturado do Ultimate Guitar, os acordes já estão 100% alinhados nas sílabas exatas das colunas

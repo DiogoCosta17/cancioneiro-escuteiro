@@ -37,19 +37,19 @@ describe('Milestone 2: Data Resilience & Strict Null Handling', () => {
   // =========================================================================
   describe('Feature 12: YouTube Shorts & Clean Embedding (getYouTubeVideoId & YouTubePlayer)', () => {
     it('extracts video ID from /shorts/ URLs with or without extra query params', () => {
-      expect(getYouTubeVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
-      expect(getYouTubeVideoId('https://youtube.com/shorts/dQw4w9WgXcQ?feature=share')).toBe('dQw4w9WgXcQ');
+      expect(getYouTubeVideoId('https://www.youtube.com/shorts/abcDEF12345')).toBe('abcDEF12345');
+      expect(getYouTubeVideoId('https://youtube.com/shorts/abcDEF12345?feature=share')).toBe('abcDEF12345');
       expect(getYouTubeVideoId('http://m.youtube.com/shorts/12345678901')).toBe('12345678901');
     });
 
     it('extracts video ID from standard watch and youtu.be URLs with surrounding whitespace', () => {
-      expect(getYouTubeVideoId('  https://www.youtube.com/watch?v=dQw4w9WgXcQ  ')).toBe('dQw4w9WgXcQ');
-      expect(getYouTubeVideoId('https://youtu.be/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
-      expect(getYouTubeVideoId('https://www.youtube.com/embed/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+      expect(getYouTubeVideoId('  https://www.youtube.com/watch?v=abcDEF12345  ')).toBe('abcDEF12345');
+      expect(getYouTubeVideoId('https://youtu.be/abcDEF12345')).toBe('abcDEF12345');
+      expect(getYouTubeVideoId('https://www.youtube.com/embed/abcDEF12345')).toBe('abcDEF12345');
     });
 
     it('accepts raw 11-character video IDs directly', () => {
-      expect(getYouTubeVideoId('dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+      expect(getYouTubeVideoId('abcDEF12345')).toBe('abcDEF12345');
       expect(getYouTubeVideoId('  abc_123-XYZ  ')).toBe('abc_123-XYZ');
     });
 
@@ -64,10 +64,10 @@ describe('Milestone 2: Data Resilience & Strict Null Handling', () => {
     });
 
     it('renders iframe with embed URL for /shorts/ video', () => {
-      render(<YouTubePlayer url="https://www.youtube.com/shorts/dQw4w9WgXcQ" />);
+      render(<YouTubePlayer url="https://www.youtube.com/shorts/abcDEF12345" />);
       const iframe = screen.getByTitle('Vídeo da Música');
       expect(iframe).toBeInTheDocument();
-      expect(iframe).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0');
+      expect(iframe).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/abcDEF12345?rel=0');
     });
 
     it('renders external link fallback for valid non-YouTube HTTP URLs', () => {
@@ -147,7 +147,7 @@ describe('Milestone 2: Data Resilience & Strict Null Handling', () => {
     it('allocates 8-column main and 4-column side layout when valid youtube URL is provided', () => {
       const songWithVideo: Song = {
         ...baseSong,
-        youtube_url: 'https://www.youtube.com/shorts/dQw4w9WgXcQ',
+        youtube_url: 'https://www.youtube.com/shorts/abcDEF12345',
       };
 
       const { container } = render(

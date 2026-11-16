@@ -236,13 +236,13 @@ describe('Distinction Features Suite (Search, Capo Advisor, Audio, QR, UI)', () 
     it('extracts CifraClub <pre> HTML preserving column alignment, key, capo, and YouTube link', () => {
       const cifraClubHtml = `
         <html>
-          <head><title>Promessa Escutista - CNE - Cifra Club</title></head>
+          <head><title>Canção de Teste - Grupo de Teste - Cifra Club</title></head>
           <body>
-            <h1 class="t1">Promessa Escutista</h1>
-            <h2 class="t3"><a href="/cne/">CNE</a></h2>
+            <h1 class="t1">Canção de Teste</h1>
+            <h2 class="t3"><a href="/grupo-de-teste/">Grupo de Teste</a></h2>
             <span id="cifra_tom"><a href="#">G</a></span>
             <span id="cifra_capo">2ª casa</span>
-            <iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe>
+            <iframe src="https://www.youtube.com/embed/abcDEF12345"></iframe>
             <pre>
 [Intro] <b>G</b>  <b>D</b>  <b>Em</b>  <b>C</b>
 
@@ -263,12 +263,12 @@ D = X X 0 2 3 2
         </html>
       `;
 
-      const extracted = extractSongFromHtml(cifraClubHtml, 'https://www.cifraclub.com.br/cne/promessa/');
-      expect(extracted.title).toBe('Promessa Escutista');
-      expect(extracted.artist).toBe('CNE');
+      const extracted = extractSongFromHtml(cifraClubHtml, 'https://example.com/cifra');
+      expect(extracted.title).toBe('Canção de Teste');
+      expect(extracted.artist).toBe('Grupo de Teste');
       expect(extracted.key).toBe('G');
       expect(extracted.capo).toBe(2);
-      expect(extracted.youtubeUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      expect(extracted.youtubeUrl).toBe('https://www.youtube.com/watch?v=abcDEF12345');
       expect(extracted.chordProContent).toContain('[G]Sempre alerta [D]para servir');
       expect(extracted.chordProContent).not.toContain('E|---3---2---0---|');
       expect(extracted.chordProContent).not.toContain('G = 3 2 0 0 0 3');
@@ -280,14 +280,14 @@ D = X X 0 2 3 2
           page: {
             data: {
               tab: {
-                song_name: 'Hino de São Francisco',
-                artist_name: 'Escuteiros',
+                song_name: 'Canção de Teste',
+                artist_name: 'Grupo de Teste',
                 tonality_name: 'Am',
                 capo: 3,
               },
               tab_view: {
                 wiki_tab: {
-                  content: '[Intro]\r\n[tab][ch]Am[/ch]        [ch]G[/ch]\r\nSenhor fazei de mim[/tab]',
+                  content: '[Intro]\r\n[tab][ch]Am[/ch]        [ch]G[/ch]\r\nAndaremos juntos[/tab]',
                 },
               },
             },
@@ -297,12 +297,12 @@ D = X X 0 2 3 2
       const encodedJson = JSON.stringify(ugPayload).replace(/"/g, '&quot;');
       const ugHtml = `<html><body><div class="js-store" data-content="${encodedJson}"></div></body></html>`;
 
-      const extracted = extractSongFromHtml(ugHtml, 'https://tabs.ultimate-guitar.com/tab/123');
-      expect(extracted.title).toBe('Hino de São Francisco');
-      expect(extracted.artist).toBe('Escuteiros');
+      const extracted = extractSongFromHtml(ugHtml, 'https://example.com/cifra');
+      expect(extracted.title).toBe('Canção de Teste');
+      expect(extracted.artist).toBe('Grupo de Teste');
       expect(extracted.key).toBe('Am');
       expect(extracted.capo).toBe(3);
-      expect(extracted.chordProContent).toContain('[Am]Senhor [G]fazei de mim');
+      expect(extracted.chordProContent).toContain('[Am]Andaremos [G]juntos');
     });
 
     it('strips guitar tablature and metadata headers via stripTablatureAndFooters', () => {
@@ -321,52 +321,49 @@ D = X X 0 2 3 2
       expect(res.cleanedText).not.toContain('E|--2--0--|');
     });
 
-    it('extracts modern CifraClub <div class="kvMV"> structure (Ergue-te Ao Sol) with [Intro] inline chords and auto-stanza labels', () => {
+    it('extracts modern CifraClub <div class="kvMV"> structure with [Intro] inline chords and auto-stanza labels', () => {
       const modernCifraClubHtml = `
         <html>
-          <head><title>Ergue-te Ao Sol - Escuteiros - Cifra Club</title></head>
+          <head><title>Canção de Teste - Grupo de Teste - Cifra Club</title></head>
           <body>
-            <h1 class="_5QAC sKA9">Ergue-te Ao Sol</h1>
+            <h1 class="_5QAC sKA9">Canção de Teste</h1>
             <h2 class="u-srOnly" id="header-title">Menu principal</h2>
-            <h2 class="_5QAC avtl1 zljom">Escuteiros</h2>
+            <h2 class="_5QAC avtl1 zljom">Grupo de Teste</h2>
             <pre class="_crVx" data-chord-content="true">
 <div class="kvMV">[Intro] <b data-chord-name="A9">A9</b>  <b data-chord-name="F#m">F#m</b>  <b data-chord-name="E">E</b>
 </div><div class="kvMV">        <b data-chord-name="A9">A9</b>  <b data-chord-name="F#m">F#m</b>  <b data-chord-name="E">E</b>
 </div>
 <div class="kvMV"><b data-chord-name="A9">A9</b>         <b data-chord-name="F#m">F#m</b>      <b data-chord-name="E">E</b>
-Quando acordares olha por mim
+Caminhamos todos os dias
 </div><div class="kvMV"><b data-chord-name="A9">A9</b>     <b data-chord-name="F#m">F#m</b>                <b data-chord-name="E">E</b>
-E em silêncio beija-me assim
+Sempre juntos, pelo mesmo caminho
 </div>
 
 <div class="kvMV"><b data-chord-name="E">E</b>            <b data-chord-name="A9">A9</b>
-Ergue-te ao Sol
+Vamos cantar juntos
 </div><div class="kvMV"><b data-chord-name="F#m">F#m</b>           <b data-chord-name="C#m">C#m</b>
-Vive cada dia como um só
+Com a alegria de quem serve
 </div>
 
 <div class="kvMV"><b data-chord-name="E">E</b>            <b data-chord-name="A9">A9</b>
-Ergue-te ao Sol
+Vamos cantar juntos
 </div><div class="kvMV"><b data-chord-name="F#m">F#m</b>           <b data-chord-name="C#m">C#m</b>
-Vive cada dia como um só
+Com a alegria de quem serve
 </div>
             </pre>
           </body>
         </html>
       `;
 
-      const extracted = extractSongFromHtml(
-        modernCifraClubHtml,
-        'https://www.cifraclub.com.br/escuteiros/ergue-te-ao-sol/'
-      );
-      expect(extracted.title).toBe('Ergue-te Ao Sol');
-      expect(extracted.artist).toBe('Escuteiros');
+      const extracted = extractSongFromHtml(modernCifraClubHtml, 'https://example.com/cifra');
+      expect(extracted.title).toBe('Canção de Teste');
+      expect(extracted.artist).toBe('Grupo de Teste');
       expect(extracted.chordProContent).toContain('{Intro}');
       expect(extracted.chordProContent).not.toContain('[Intro]');
       expect(extracted.chordProContent).toContain('{Estrofe 1}');
-      expect(extracted.chordProContent).toContain('[A9]Quando [F#m]acordares [E]olha por mim');
+      expect(extracted.chordProContent).toContain('[A9]Caminhamos [F#m]todos os [E]dias');
       expect(extracted.chordProContent).toContain('{Refrão}');
-      expect(extracted.chordProContent).toContain('[E]Ergue-te ao [A9]Sol');
+      expect(extracted.chordProContent).toContain('[E]Vamos cantar [A9]juntos');
     });
   });
 });
