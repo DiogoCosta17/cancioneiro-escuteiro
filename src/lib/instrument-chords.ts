@@ -129,9 +129,10 @@ const CAVAQUINHO_SHAPES: Record<string, string> = {
 const SHARP_TO_FLAT: Record<string, string> = { 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb' };
 
 /**
- * Calcula dedos, pestana e casa base de um desenho de 4 cordas (apenas indicativo para o diagrama).
+ * Calcula dedos, pestana e casa base de um desenho (apenas indicativo para o diagrama).
+ * Usado nas tabelas de 4 cordas e nas posições alternativas geradas para qualquer instrumento.
  */
-function buildDefinition(name: string, frets: number[]): ChordDefinition {
+export function buildChordDefinition(name: string, frets: number[]): ChordDefinition {
   const fretted = frets.filter((f) => f > 0);
   const minFret = fretted.length ? Math.min(...fretted) : 0;
   const maxFret = fretted.length ? Math.max(...fretted) : 0;
@@ -178,13 +179,13 @@ function buildTable(shapes: Record<string, string>): Record<string, ChordDefinit
   const table: Record<string, ChordDefinition> = {};
   for (const [name, shape] of Object.entries(shapes)) {
     const frets = shape.split('').map(Number);
-    table[name] = buildDefinition(name, frets);
+    table[name] = buildChordDefinition(name, frets);
 
     // Enarmónicos: Db = C#, Eb = D#, Gb = F#, Ab = G#, Bb = A#
     const sharpRoot = name.match(/^([A-G]#)(.*)$/);
     if (sharpRoot && SHARP_TO_FLAT[sharpRoot[1]]) {
       const flatName = `${SHARP_TO_FLAT[sharpRoot[1]]}${sharpRoot[2]}`;
-      table[flatName] = buildDefinition(flatName, frets);
+      table[flatName] = buildChordDefinition(flatName, frets);
     }
   }
   return table;
