@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, renderHook } from '@testing-library/react';
 import { SongListProvider, useSongList } from '../../hooks/useSongList';
 
 function TestSongConsumer() {
@@ -31,7 +31,7 @@ function TestSongConsumer() {
   );
 }
 
-describe('Tier 1: Song List Management (useSongList & SongListProvider)', () => {
+describe('A Minha Lista (useSongList)', () => {
   beforeEach(() => {
     localStorage.clear();
   });
@@ -172,5 +172,53 @@ describe('Tier 1: Song List Management (useSongList & SongListProvider)', () => 
     }).toThrow('useSongList must be used within a SongListProvider');
 
     spy.mockRestore();
+  });
+});
+
+describe('A Minha Lista: dados inválidos', () => {
+  const wrapper = ({ children }: { children: React.ReactNode }) => <SongListProvider>{children}</SongListProvider>;
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('começa vazia quando o localStorage tem JSON corrompido ou que não é uma lista', () => {
+    for (const stored of ['{"broken json: true', '12345']) {
+      localStorage.setItem('scout_song_list', stored);
+      const { result, unmount } = renderHook(() => useSongList(), { wrapper });
+      expect(result.current.selectedSongIds).toEqual([]);
+      unmount();
+    }
+  });
+
+  it('descarta entradas guardadas que não são ids válidos', () => {
+    localStorage.setItem('scout_song_list', JSON.stringify(['valid-1', null, 42, '   ', 'valid-2']));
+    const { result } = renderHook(() => useSongList(), { wrapper });
+    expect(result.current.selectedSongIds).toEqual(['valid-1', 'valid-2']);
+  });
+
+  it('não aceita ids vazios ou que não são texto', () => {
+    const { result } = renderHook(() => useSongList(), { wrapper });
+    act(() => {
+      for (const invalid of ['', '   ', null, 123]) result.current.addSong(invalid as unknown as string);
+    });
+    expect(result.current.selectedSongIds).toEqual([]);
+
+    act(() => {
+      result.current.addSong('valid-song');
+    });
+    expect(result.current.selectedSongIds).toEqual(['valid-song']);
+    for (const invalid of [null, undefined, '']) {
+      expect(result.current.isInList(invalid as unknown as string)).toBe(false);
+    }
+  });
+
+  it('as funções mantêm a mesma referência entre renders (evita re-renders dos cartões)', () => {
+    const { result, rerender } = renderHook(() => useSongList(), { wrapper });
+    const before = { ...result.current };
+    rerender();
+    for (const fn of ['addSong', 'removeSong', 'toggleSong', 'clearList', 'reorderSongs', 'isInList'] as const) {
+      expect(result.current[fn]).toBe(before[fn]);
+    }
   });
 });

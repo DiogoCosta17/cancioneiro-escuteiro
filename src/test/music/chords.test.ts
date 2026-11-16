@@ -12,7 +12,7 @@ import {
 import { getChordDefinition, normalizeChordName } from '../../lib/guitar-chords';
 import { cleanAndAlignChordPro } from '../../lib/chordpro-parser';
 
-describe('Tier 1: Music & Chords Engine (chords.ts)', () => {
+describe('Acordes: leitura, transposição e notação (chords.ts)', () => {
   describe('parseChord', () => {
     it('parses standard English major chords', () => {
       expect(parseChord('C')).toEqual({ root: 'C', suffix: '' });
@@ -99,7 +99,7 @@ describe('Tier 1: Music & Chords Engine (chords.ts)', () => {
   });
 
   describe('formatChordNotation', () => {
-    it('formats into alphabetical notation and normalizes hyphenated minors (Feature 17)', () => {
+    it('formats into alphabetical notation and normalizes hyphenated minors', () => {
       expect(formatChordNotation('C', 'alfabetica')).toBe('C');
       expect(formatChordNotation('Dó', 'alfabetica')).toBe('C');
       expect(formatChordNotation('Sol', 'alfabetica')).toBe('G');
@@ -139,7 +139,7 @@ describe('Tier 1: Music & Chords Engine (chords.ts)', () => {
   });
 
   describe('semitoneDifference & getKeyName', () => {
-    it('calculates semitone distance correctly for major, minor and solfege roots (Feature 19)', () => {
+    it('calculates semitone distance correctly for major, minor and solfege roots', () => {
       expect(semitoneDifference('C', 'D')).toBe(2);
       expect(semitoneDifference('C', 'G')).toBe(7);
       expect(semitoneDifference('G', 'C')).toBe(5);

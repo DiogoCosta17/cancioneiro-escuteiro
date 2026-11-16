@@ -11,7 +11,7 @@ import {
   transposeParsedLines,
 } from '../../lib/chordpro-parser';
 
-describe('Tier 2: Boundary & Corner Cases (boundary-edge-cases.test.ts)', () => {
+describe('Acordes: casos limite', () => {
   describe('Empty and Malformed Content Resilience', () => {
     it('handles empty string content gracefully', () => {
       expect(cleanAndAlignChordPro('')).toBe('');

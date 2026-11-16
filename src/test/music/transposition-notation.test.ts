@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseChordPro, transposeParsedLines } from '../../lib/chordpro-parser';
 import { getKeyName } from '../../lib/chords';
 
-describe('Tier 3: Cross-Feature Combinations — Transposition & Notation Switching', () => {
+describe('Transposição combinada com mudança de notação', () => {
   const songSnippet = `
 {Refrão}
 [C]Canta com [G]alegria

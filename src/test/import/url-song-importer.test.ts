@@ -15,6 +15,7 @@ import {
   fetchAndExtractSong,
   importSongFromUrl,
   looksLikeBlockedPage,
+  stripTablatureAndFooters,
 } from '../../lib/url-song-importer';
 
 // Codifica o atributo como o Ultimate Guitar faz: aspas e & como entidades, apóstrofos em bruto
@@ -210,5 +211,140 @@ describe('url-song-importer: obtenção da página', () => {
     expect(result.content).toContain('[D]want');
     expect(result.sourceUrl).toBe('https://example.com/cifra');
     expect(stages.length).toBe(2);
+  });
+});
+
+describe('url-song-importer: estrutura de cada site', () => {
+  it('CifraClub (<pre> clássico): alinhamento, tom, capo, YouTube; remove tablatura e dicionário de acordes', () => {
+    const cifraClubHtml = `
+      <html>
+        <head><title>Canção de Teste - Grupo de Teste - Cifra Club</title></head>
+        <body>
+          <h1 class="t1">Canção de Teste</h1>
+          <h2 class="t3"><a href="/grupo-de-teste/">Grupo de Teste</a></h2>
+          <span id="cifra_tom"><a href="#">G</a></span>
+          <span id="cifra_capo">2ª casa</span>
+          <iframe src="https://www.youtube.com/embed/abcDEF12345"></iframe>
+          <pre>
+[Intro] <b>G</b>  <b>D</b>  <b>Em</b>  <b>C</b>
+
+[Primeira Parte]
+<b>G</b>             <b>D</b>
+Sempre alerta para servir
+<b>Em</b>            <b>C</b>
+No caminho da fraternidade
+
+E|---3---2---0---|
+B|---0---3---0---|
+
+----------------- Acordes -----------------
+G = 3 2 0 0 0 3
+D = X X 0 2 3 2
+          </pre>
+        </body>
+      </html>
+    `;
+
+    const extracted = extractSongFromHtml(cifraClubHtml, 'https://example.com/cifra');
+    expect(extracted.title).toBe('Canção de Teste');
+    expect(extracted.artist).toBe('Grupo de Teste');
+    expect(extracted.key).toBe('G');
+    expect(extracted.capo).toBe(2);
+    expect(extracted.youtubeUrl).toBe('https://www.youtube.com/watch?v=abcDEF12345');
+    expect(extracted.chordProContent).toContain('[G]Sempre alerta [D]para servir');
+    expect(extracted.chordProContent).not.toContain('E|---3---2---0---|');
+    expect(extracted.chordProContent).not.toContain('G = 3 2 0 0 0 3');
+  });
+
+  it('Ultimate Guitar (js-store): metadados e acordes marcados com [ch]', () => {
+    const ugPayload = {
+      store: {
+        page: {
+          data: {
+            tab: {
+              song_name: 'Canção de Teste',
+              artist_name: 'Grupo de Teste',
+              tonality_name: 'Am',
+              capo: 3,
+            },
+            tab_view: {
+              wiki_tab: {
+                content: '[Intro]\r\n[tab][ch]Am[/ch]        [ch]G[/ch]\r\nAndaremos juntos[/tab]',
+              },
+            },
+          },
+        },
+      },
+    };
+    const encodedJson = JSON.stringify(ugPayload).replace(/"/g, '&quot;');
+    const ugHtml = `<html><body><div class="js-store" data-content="${encodedJson}"></div></body></html>`;
+
+    const extracted = extractSongFromHtml(ugHtml, 'https://example.com/cifra');
+    expect(extracted.title).toBe('Canção de Teste');
+    expect(extracted.artist).toBe('Grupo de Teste');
+    expect(extracted.key).toBe('Am');
+    expect(extracted.capo).toBe(3);
+    expect(extracted.chordProContent).toContain('[Am]Andaremos [G]juntos');
+  });
+
+  it('stripTablatureAndFooters retira tablatura e lê tom e capo do cabeçalho', () => {
+    const raw = [
+      'Tom: D',
+      'Capotraste na 4ª casa',
+      'D          A',
+      'Caminhando juntos',
+      'E|--2--0--|',
+      'B|--3--2--|',
+    ].join('\n');
+    const res = stripTablatureAndFooters(raw);
+    expect(res.detectedKey).toBe('D');
+    expect(res.detectedCapo).toBe(4);
+    expect(res.cleanedText).toContain('Caminhando juntos');
+    expect(res.cleanedText).not.toContain('E|--2--0--|');
+  });
+
+  it('CifraClub (estrutura nova com <div>): [Intro] em linha e estrofes/refrão detetados', () => {
+    const modernCifraClubHtml = `
+      <html>
+        <head><title>Canção de Teste - Grupo de Teste - Cifra Club</title></head>
+        <body>
+          <h1 class="_5QAC sKA9">Canção de Teste</h1>
+          <h2 class="u-srOnly" id="header-title">Menu principal</h2>
+          <h2 class="_5QAC avtl1 zljom">Grupo de Teste</h2>
+          <pre class="_crVx" data-chord-content="true">
+<div class="kvMV">[Intro] <b data-chord-name="A9">A9</b>  <b data-chord-name="F#m">F#m</b>  <b data-chord-name="E">E</b>
+</div><div class="kvMV">        <b data-chord-name="A9">A9</b>  <b data-chord-name="F#m">F#m</b>  <b data-chord-name="E">E</b>
+</div>
+<div class="kvMV"><b data-chord-name="A9">A9</b>         <b data-chord-name="F#m">F#m</b>      <b data-chord-name="E">E</b>
+Caminhamos todos os dias
+</div><div class="kvMV"><b data-chord-name="A9">A9</b>     <b data-chord-name="F#m">F#m</b>                <b data-chord-name="E">E</b>
+Sempre juntos, pelo mesmo caminho
+</div>
+
+<div class="kvMV"><b data-chord-name="E">E</b>            <b data-chord-name="A9">A9</b>
+Vamos cantar juntos
+</div><div class="kvMV"><b data-chord-name="F#m">F#m</b>           <b data-chord-name="C#m">C#m</b>
+Com a alegria de quem serve
+</div>
+
+<div class="kvMV"><b data-chord-name="E">E</b>            <b data-chord-name="A9">A9</b>
+Vamos cantar juntos
+</div><div class="kvMV"><b data-chord-name="F#m">F#m</b>           <b data-chord-name="C#m">C#m</b>
+Com a alegria de quem serve
+</div>
+          </pre>
+        </body>
+      </html>
+    `;
+
+    const extracted = extractSongFromHtml(modernCifraClubHtml, 'https://example.com/cifra');
+    expect(extracted.title).toBe('Canção de Teste');
+    expect(extracted.artist).toBe('Grupo de Teste');
+    expect(extracted.chordProContent).toContain('{Intro}');
+    expect(extracted.chordProContent).not.toContain('[Intro]');
+    expect(extracted.chordProContent).toContain('{Estrofe 1}');
+    expect(extracted.chordProContent).toContain('[A9]Caminhamos [F#m]todos os [E]dias');
+    expect(extracted.chordProContent).toContain('{Refrão}');
+    expect(extracted.chordProContent).toContain('[E]Vamos cantar [A9]juntos');
   });
 });
