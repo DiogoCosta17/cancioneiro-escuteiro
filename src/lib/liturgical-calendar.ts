@@ -6,6 +6,8 @@
  * e a Ascensão passa para o domingo seguinte (VII Domingo da Páscoa).
  * Só são nomeadas as celebrações relevantes para preparar missas com cânticos
  * (domingos e principais solenidades); os restantes dias da semana devolvem `celebration: null`.
+ * Missas vespertinas: na véspera de um domingo ou solenidade, a missa da tarde/noite já é a do
+ * dia seguinte (`getLiturgicalDay(data, { evening: true })`), incluindo a Vigília Pascal e a Missa do Galo.
  */
 
 export type LiturgicalSeason = 'advento' | 'natal' | 'quaresma' | 'pascoa' | 'comum';
@@ -23,7 +25,10 @@ export interface LiturgicalDay {
   celebration: string | null;
   /** Celebração de Nossa Senhora (ex.: Imaculada Conceição). */
   marian: boolean;
+  /** Domingo (numa missa vespertina, refere-se ao dia cuja liturgia se celebra). */
   isSunday: boolean;
+  /** Missa vespertina da véspera: a data escolhida é a véspera, a liturgia é a do dia seguinte. */
+  anticipated: boolean;
 }
 
 export const SEASON_NAMES: Record<LiturgicalSeason, string> = {
@@ -100,7 +105,26 @@ export function baptismOfTheLord(year: number): Date {
   return ep.getDate() >= 7 ? addDays(ep, 1) : addDays(ep, 7);
 }
 
-/** Sagrada Família: domingo na oitava do Natal, ou 30 de dezembro se não houver domingo. */
+/** São José (19/3): num domingo da Quaresma passa para segunda-feira; na Semana Santa, para o sábado antes de Ramos. */
+export function saintJoseph(year: number): Date {
+  const palmSunday = addDays(easterSunday(year), -7);
+  const date = new Date(year, 2, 19);
+  if (date >= palmSunday) return addDays(palmSunday, -1);
+  return date.getDay() === 0 ? addDays(date, 1) : date;
+}
+
+/**
+ * Anunciação (25/3): num domingo da Quaresma passa para segunda-feira; na Semana Santa ou na oitava
+ * da Páscoa, para a segunda-feira a seguir ao II Domingo da Páscoa.
+ */
+export function annunciation(year: number): Date {
+  const easter = easterSunday(year);
+  const date = new Date(year, 2, 25);
+  if (date >= addDays(easter, -7) && date <= addDays(easter, 7)) return addDays(easter, 8);
+  return date.getDay() === 0 ? addDays(date, 1) : date;
+}
+
+/** Sagrada Família:domingo na oitava do Natal, ou 30 de dezembro se não houver domingo. */
 function holyFamily(year: number): Date {
   for (let day = 26; day <= 31; day++) {
     const d = new Date(year, 11, day);
@@ -110,10 +134,10 @@ function holyFamily(year: number): Date {
 }
 
 // Festas do Senhor e solenidades de data fixa que, no Tempo Comum, se sobrepõem ao domingo
-const FIXED_ORDINARY_CELEBRATIONS: { month: number; day: number; name: string; color: LiturgicalColor }[] = [
+const FIXED_ORDINARY_CELEBRATIONS: { month: number; day: number; name: string; color: LiturgicalColor; solemnity?: boolean }[] = [
   { month: 1, day: 2, name: 'Apresentação do Senhor', color: 'branco' },
-  { month: 5, day: 24, name: 'Nascimento de São João Batista', color: 'branco' },
-  { month: 5, day: 29, name: 'São Pedro e São Paulo, Apóstolos', color: 'vermelho' },
+  { month: 5, day: 24, name: 'Nascimento de São João Batista', color: 'branco', solemnity: true },
+  { month: 5, day: 29, name: 'São Pedro e São Paulo, Apóstolos', color: 'vermelho', solemnity: true },
   { month: 7, day: 6, name: 'Transfiguração do Senhor', color: 'branco' },
   { month: 8, day: 14, name: 'Exaltação da Santa Cruz', color: 'vermelho' },
   { month: 10, day: 9, name: 'Dedicação da Basílica de Latrão', color: 'branco' },
@@ -149,6 +173,8 @@ interface DayInfo {
   color: LiturgicalColor;
   celebration: string | null;
   marian?: boolean;
+  /** Solenidade: a missa vespertina da véspera já é a deste dia. */
+  solemnity?: boolean;
 }
 
 function computeDay(d: Date): DayInfo {
@@ -166,7 +192,7 @@ function computeDay(d: Date): DayInfo {
     const dec8 = new Date(year, 11, 8);
     const immaculate = dec8.getDay() === 0 ? addDays(dec8, 1) : dec8;
     if (sameDay(d, immaculate)) {
-      return { season: 'advento', color: 'branco', celebration: 'Imaculada Conceição da Virgem Santa Maria', marian: true };
+      return { season: 'advento', color: 'branco', celebration: 'Imaculada Conceição da Virgem Santa Maria', marian: true, solemnity: true };
     }
     const week = Math.floor(diffDays(advent1, d) / 7) + 1;
     if (isSunday) {
@@ -177,7 +203,7 @@ function computeDay(d: Date): DayInfo {
 
   // Natal (25 a 31 de dezembro)
   if (d >= christmas) {
-    if (sameDay(d, christmas)) return { season: 'natal', color: 'branco', celebration: 'Natal do Senhor' };
+    if (sameDay(d, christmas)) return { season: 'natal', color: 'branco', celebration: 'Natal do Senhor', solemnity: true };
     if (sameDay(d, holyFamily(year))) return { season: 'natal', color: 'branco', celebration: 'Sagrada Família de Jesus, Maria e José' };
     return { season: 'natal', color: 'branco', celebration: null };
   }
@@ -186,9 +212,9 @@ function computeDay(d: Date): DayInfo {
   const baptism = baptismOfTheLord(year);
   if (d <= baptism) {
     if (month === 0 && date === 1) {
-      return { season: 'natal', color: 'branco', celebration: 'Santa Maria, Mãe de Deus', marian: true };
+      return { season: 'natal', color: 'branco', celebration: 'Santa Maria, Mãe de Deus', marian: true, solemnity: true };
     }
-    if (sameDay(d, epiphany(year))) return { season: 'natal', color: 'branco', celebration: 'Epifania do Senhor' };
+    if (sameDay(d, epiphany(year))) return { season: 'natal', color: 'branco', celebration: 'Epifania do Senhor', solemnity: true };
     if (sameDay(d, baptism)) return { season: 'natal', color: 'branco', celebration: 'Batismo do Senhor' };
     return { season: 'natal', color: 'branco', celebration: null };
   }
@@ -197,6 +223,20 @@ function computeDay(d: Date): DayInfo {
   const ashWednesday = addDays(easter, -46);
   const palmSunday = addDays(easter, -7);
   const pentecost = addDays(easter, 49);
+
+  // Solenidades de março, já com as transferências (domingo da Quaresma, Semana Santa, oitava da Páscoa)
+  if (sameDay(d, saintJoseph(year))) {
+    return { season: 'quaresma', color: 'branco', celebration: 'São José, Esposo da Virgem Santa Maria', solemnity: true };
+  }
+  if (sameDay(d, annunciation(year))) {
+    return {
+      season: d > easter ? 'pascoa' : 'quaresma',
+      color: 'branco',
+      celebration: 'Anunciação do Senhor',
+      marian: true,
+      solemnity: true,
+    };
+  }
 
   // Quaresma e Semana Santa (até Sábado Santo)
   if (d >= ashWednesday && d < easter) {
@@ -219,35 +259,39 @@ function computeDay(d: Date): DayInfo {
 
   // Páscoa (até ao Pentecostes)
   if (d >= easter && d <= pentecost) {
-    if (sameDay(d, easter)) return { season: 'pascoa', color: 'branco', celebration: 'Domingo de Páscoa da Ressurreição do Senhor' };
-    if (sameDay(d, pentecost)) return { season: 'pascoa', color: 'vermelho', celebration: 'Domingo de Pentecostes' };
+    if (sameDay(d, easter)) {
+      return { season: 'pascoa', color: 'branco', celebration: 'Domingo de Páscoa da Ressurreição do Senhor', solemnity: true };
+    }
+    if (sameDay(d, pentecost)) return { season: 'pascoa', color: 'vermelho', celebration: 'Domingo de Pentecostes', solemnity: true };
     if (isSunday) {
       const week = Math.floor(diffDays(easter, d) / 7) + 1;
-      if (week === 7) return { season: 'pascoa', color: 'branco', celebration: 'Ascensão do Senhor' };
+      if (week === 7) return { season: 'pascoa', color: 'branco', celebration: 'Ascensão do Senhor', solemnity: true };
       return { season: 'pascoa', color: 'branco', celebration: `${toRoman(week)} Domingo da Páscoa` };
     }
     return { season: 'pascoa', color: 'branco', celebration: null };
   }
 
   // Tempo Comum: solenidades que se sobrepõem ao domingo
-  if (sameDay(d, addDays(pentecost, 7))) return { season: 'comum', color: 'branco', celebration: 'Santíssima Trindade' };
+  if (sameDay(d, addDays(pentecost, 7))) {
+    return { season: 'comum', color: 'branco', celebration: 'Santíssima Trindade', solemnity: true };
+  }
   if (sameDay(d, addDays(pentecost, 11))) {
-    return { season: 'comum', color: 'branco', celebration: 'Santíssimo Corpo e Sangue de Cristo (Corpo de Deus)' };
+    return { season: 'comum', color: 'branco', celebration: 'Santíssimo Corpo e Sangue de Cristo (Corpo de Deus)', solemnity: true };
   }
   if (month === 7 && date === 15) {
-    return { season: 'comum', color: 'branco', celebration: 'Assunção de Nossa Senhora', marian: true };
+    return { season: 'comum', color: 'branco', celebration: 'Assunção de Nossa Senhora', marian: true, solemnity: true };
   }
-  if (month === 10 && date === 1) return { season: 'comum', color: 'branco', celebration: 'Todos os Santos' };
+  if (month === 10 && date === 1) return { season: 'comum', color: 'branco', celebration: 'Todos os Santos', solemnity: true };
   if (month === 10 && date === 2) {
     return { season: 'comum', color: 'roxo', celebration: 'Comemoração de Todos os Fiéis Defuntos' };
   }
 
   const fixed = FIXED_ORDINARY_CELEBRATIONS.find(c => c.month === month && c.day === date);
-  if (fixed) return { season: 'comum', color: fixed.color, celebration: fixed.name };
+  if (fixed) return { season: 'comum', color: fixed.color, celebration: fixed.name, solemnity: fixed.solemnity };
 
   const christTheKing = addDays(advent1, -7);
   if (sameDay(d, christTheKing)) {
-    return { season: 'comum', color: 'branco', celebration: 'Nosso Senhor Jesus Cristo, Rei do Universo' };
+    return { season: 'comum', color: 'branco', celebration: 'Nosso Senhor Jesus Cristo, Rei do Universo', solemnity: true };
   }
 
   if (!isSunday) return { season: 'comum', color: 'verde', celebration: null };
@@ -260,9 +304,35 @@ function computeDay(d: Date): DayInfo {
   return { season: 'comum', color: 'verde', celebration: `Domingo ${toRoman(number)} do Tempo Comum` };
 }
 
-export function getLiturgicalDay(date: Date): LiturgicalDay {
-  const d = dayOnly(date);
-  const info = computeDay(d);
+/**
+ * A missa da tarde/noite deste dia já é a do dia seguinte? Sim nas vésperas de domingo e de solenidade
+ * (inclui o Sábado Santo → Vigília Pascal e o 24 de dezembro → Missa do Galo).
+ */
+export function hasEveningMassOfNextDay(date: Date): boolean {
+  const next = addDays(dayOnly(date), 1);
+  return next.getDay() === 0 || Boolean(computeDay(next).solemnity);
+}
+
+function eveningCelebration(eve: Date, next: DayInfo): DayInfo {
+  if (eve.getMonth() === 11 && eve.getDate() === 24) {
+    return { ...next, celebration: 'Natal do Senhor — Missa da Vigília / Missa do Galo' };
+  }
+  if (sameDay(addDays(eve, 1), easterSunday(eve.getFullYear()))) {
+    return { ...next, celebration: 'Vigília Pascal na Noite Santa' };
+  }
+  return next;
+}
+
+export interface LiturgicalDayOptions {
+  /** Missa da tarde/noite: nas vésperas de domingo ou solenidade devolve a liturgia do dia seguinte. */
+  evening?: boolean;
+}
+
+export function getLiturgicalDay(date: Date, options: LiturgicalDayOptions = {}): LiturgicalDay {
+  const eve = dayOnly(date);
+  const anticipated = Boolean(options.evening) && hasEveningMassOfNextDay(eve);
+  const d = anticipated ? addDays(eve, 1) : eve;
+  const info = anticipated ? eveningCelebration(eve, computeDay(d)) : computeDay(d);
   return {
     season: info.season,
     seasonName: info.seasonName || SEASON_NAMES[info.season],
@@ -271,5 +341,6 @@ export function getLiturgicalDay(date: Date): LiturgicalDay {
     celebration: info.celebration,
     marian: Boolean(info.marian),
     isSunday: d.getDay() === 0,
+    anticipated,
   };
 }

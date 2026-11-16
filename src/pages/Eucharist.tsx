@@ -9,7 +9,7 @@ import { MassPlanner } from '../components/eucharist/MassPlanner';
 import { CandidateBadges } from '../components/eucharist/CandidateBadges';
 import { normalizeSearchText, searchAndRankSongs } from '../lib/search-utils';
 import { LITURGICAL_MOMENTS } from '../lib/liturgical-moments';
-import { getLiturgicalDay } from '../lib/liturgical-calendar';
+import { getLiturgicalDay, hasEveningMassOfNextDay } from '../lib/liturgical-calendar';
 import { buildMassPlan } from '../lib/mass-planner';
 import { isValidISODate, nextSunday, parseEventDate, toLocalISODate } from '../lib/dates';
 import { Church, Search, X, Music, Sparkles, ChevronUp, Info, BookMarked } from 'lucide-react';
@@ -47,8 +47,16 @@ export default function Eucharist() {
     }
   });
 
+  // Missa vespertina (sábado à tarde, véspera de solenidade, Vigília Pascal, Missa do Galo): liturgia do dia seguinte
+  const [evening, setEvening] = useState(false);
+
   const targetDate = useMemo(() => parseEventDate(dateISO), [dateISO]);
-  const liturgicalDay = useMemo(() => getLiturgicalDay(targetDate), [targetDate]);
+  const eveningAvailable = useMemo(() => hasEveningMassOfNextDay(targetDate), [targetDate]);
+  const liturgicalDay = useMemo(() => getLiturgicalDay(targetDate, { evening }), [targetDate, evening]);
+  // As leituras de uma missa vespertina são as do dia seguinte
+  const readingsDateISO = liturgicalDay.anticipated
+    ? toLocalISODate(new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate() + 1))
+    : dateISO;
   const slots = useMemo(
     () => buildMassPlan(Array.isArray(songs) ? songs : [], liturgicalDay),
     [songs, liturgicalDay]
@@ -117,16 +125,23 @@ export default function Eucharist() {
         </button>
       </div>
 
-      <LiturgicalBanner day={liturgicalDay} dateISO={dateISO} onDateChange={setDateISO}>
+      <LiturgicalBanner
+        day={liturgicalDay}
+        dateISO={dateISO}
+        onDateChange={setDateISO}
+        evening={evening}
+        eveningAvailable={eveningAvailable}
+        onEveningChange={setEvening}
+      >
         <Link
-          to={`/liturgia?data=${dateISO}`}
+          to={`/liturgia?data=${readingsDateISO}`}
           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800 text-xs font-semibold text-gray-700 dark:text-gray-200"
         >
           <BookMarked className="w-3.5 h-3.5" /> Ver leituras do dia
         </Link>
       </LiturgicalBanner>
 
-      {plannerOpen && <MassPlanner key={dateISO} slots={slots} day={liturgicalDay} dateISO={dateISO} />}
+      {plannerOpen && <MassPlanner key={`${dateISO}-${liturgicalDay.anticipated}`} slots={slots} day={liturgicalDay} dateISO={dateISO} />}
 
       {/* Régua / Linha dos 9 Momentos da Missa */}
       <div className="mb-10 overflow-x-auto pb-3 -mx-4 px-4 sm:mx-0 sm:px-0">

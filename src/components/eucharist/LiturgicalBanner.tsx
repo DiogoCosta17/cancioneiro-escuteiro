@@ -23,6 +23,13 @@ interface LiturgicalBannerProps {
   fallbackTitle?: string | null;
   /** Links ou botões extra por baixo do nome do dia. */
   children?: ReactNode;
+  /**
+   * Opção "Missa vespertina" (véspera de domingo ou solenidade). Só aparece quando `onEveningChange`
+   * é dado e a data escolhida tem missa vespertina com a liturgia do dia seguinte.
+   */
+  evening?: boolean;
+  eveningAvailable?: boolean;
+  onEveningChange?: (value: boolean) => void;
 }
 
 export function LiturgicalBanner({
@@ -32,6 +39,9 @@ export function LiturgicalBanner({
   dateLabel = 'Preparar para o dia',
   fallbackTitle,
   children,
+  evening = false,
+  eveningAvailable = false,
+  onEveningChange,
 }: LiturgicalBannerProps) {
   const colors = COLOR_CLASSES[day.color];
   const formatted = parseEventDate(dateISO).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -49,7 +59,7 @@ export function LiturgicalBanner({
             {day.celebration || fallbackTitle || `Dia de semana — ${day.seasonName}`}
           </h2>
           <p className="text-sm text-gray-500 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>{longDate}</span>
+            <span>{longDate}{day.anticipated && ' · missa vespertina'}</span>
             <span className="inline-flex items-center gap-1.5">
               <span className={`inline-block w-3 h-3 rounded-full ${colors.dot}`} aria-hidden="true" />
               Cor litúrgica: {COLOR_NAMES[day.color]}
@@ -58,20 +68,33 @@ export function LiturgicalBanner({
           {children && <div className="mt-3 flex flex-wrap gap-2">{children}</div>}
         </div>
 
-        <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600 dark:text-zinc-400 shrink-0">
-          <span className="inline-flex items-center gap-1.5">
-            <CalendarDays className="w-3.5 h-3.5" />
-            {dateLabel}
-          </span>
-          <input
-            type="date"
-            value={dateISO}
-            onChange={e => {
-              if (e.target.value) onDateChange(e.target.value);
-            }}
-            className="bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#2d5016]"
-          />
-        </label>
+        <div className="flex flex-col shrink-0">
+          <label className="flex flex-col gap-1 text-xs font-semibold text-gray-600 dark:text-zinc-400">
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarDays className="w-3.5 h-3.5" />
+              {dateLabel}
+            </span>
+            <input
+              type="date"
+              value={dateISO}
+              onChange={e => {
+                if (e.target.value) onDateChange(e.target.value);
+              }}
+              className="bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#2d5016]"
+            />
+          </label>
+          {onEveningChange && eveningAvailable && (
+            <label className="inline-flex items-center gap-2 mt-2 text-xs font-medium text-gray-700 dark:text-zinc-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={evening}
+                onChange={e => onEveningChange(e.target.checked)}
+                className="w-4 h-4 accent-[#2d5016]"
+              />
+              Missa vespertina (liturgia do dia seguinte)
+            </label>
+          )}
+        </div>
       </div>
     </div>
   );

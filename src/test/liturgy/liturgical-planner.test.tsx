@@ -8,7 +8,11 @@ import {
   getLiturgicalDay,
   liturgicalCycle,
   toRoman,
+  saintJoseph,
+  annunciation,
+  hasEveningMassOfNextDay,
 } from '../../lib/liturgical-calendar';
+import { LiturgicalBanner } from '../../components/eucharist/LiturgicalBanner';
 import {
   buildMassPlan,
   initialSelection,
@@ -115,6 +119,92 @@ describe('Calendário litúrgico', () => {
 
   it('ignora as horas da data recebida', () => {
     expect(getLiturgicalDay(new Date(2026, 10, 29, 23, 59)).celebration).toBe('I Domingo do Advento');
+  });
+
+  it('São José: domingo da Quaresma → segunda-feira; Semana Santa → sábado antes de Ramos', () => {
+    expect(saintJoseph(2026)).toEqual(d(2026, 3, 19));
+    expect(saintJoseph(2028)).toEqual(d(2028, 3, 20));
+    expect(saintJoseph(2008)).toEqual(d(2008, 3, 15));
+    const day = getLiturgicalDay(d(2026, 3, 19));
+    expect(day.celebration).toBe('São José, Esposo da Virgem Santa Maria');
+    expect([day.season, day.color]).toEqual(['quaresma', 'branco']);
+  });
+
+  it('Anunciação: domingo da Quaresma → segunda-feira; Semana Santa ou oitava da Páscoa → depois do II Domingo da Páscoa', () => {
+    expect(annunciation(2026)).toEqual(d(2026, 3, 25));
+    expect(annunciation(2007)).toEqual(d(2007, 3, 26));
+    expect(annunciation(2024)).toEqual(d(2024, 4, 8));
+    expect(annunciation(2016)).toEqual(d(2016, 4, 4));
+    const moved = getLiturgicalDay(d(2024, 4, 8));
+    expect(moved.celebration).toBe('Anunciação do Senhor');
+    expect([moved.season, moved.color, moved.marian]).toEqual(['pascoa', 'branco', true]);
+    expect(getLiturgicalDay(d(2024, 3, 25)).celebration).toBeNull();
+  });
+
+  it('missa vespertina: véspera de domingo ou solenidade usa a liturgia do dia seguinte', () => {
+    expect(hasEveningMassOfNextDay(d(2026, 11, 28))).toBe(true); // sábado
+    expect(hasEveningMassOfNextDay(d(2026, 6, 3))).toBe(true); // véspera do Corpo de Deus
+    expect(hasEveningMassOfNextDay(d(2026, 11, 4))).toBe(false);
+
+    const saturday = getLiturgicalDay(d(2026, 11, 28), { evening: true });
+    expect(saturday.celebration).toBe('I Domingo do Advento');
+    expect([saturday.season, saturday.cycle, saturday.anticipated]).toEqual(['advento', 'B', true]);
+    const morning = getLiturgicalDay(d(2026, 11, 28));
+    expect([morning.season, morning.cycle, morning.anticipated]).toEqual(['comum', 'A', false]);
+
+    expect(getLiturgicalDay(d(2026, 8, 14), { evening: true }).celebration).toBe('Assunção de Nossa Senhora');
+    // Sem missa vespertina no dia seguinte, a opção não muda nada
+    const weekday = getLiturgicalDay(d(2026, 11, 4), { evening: true });
+    expect([weekday.celebration, weekday.anticipated]).toEqual([null, false]);
+  });
+
+  it('Vigília Pascal e Missa do Galo', () => {
+    const vigil = getLiturgicalDay(d(2026, 4, 4), { evening: true });
+    expect([vigil.celebration, vigil.season, vigil.color]).toEqual(['Vigília Pascal na Noite Santa', 'pascoa', 'branco']);
+    expect(getLiturgicalDay(d(2026, 4, 4)).celebration).toBe('Sábado Santo');
+    const christmasEve = getLiturgicalDay(d(2026, 12, 24), { evening: true });
+    expect([christmasEve.celebration, christmasEve.season]).toEqual(['Natal do Senhor — Missa da Vigília / Missa do Galo', 'natal']);
+  });
+});
+
+describe('LiturgicalBanner', () => {
+  it('mostra a opção de missa vespertina só quando existe', () => {
+    const onEveningChange = vi.fn();
+    const { rerender } = render(
+      <LiturgicalBanner
+        day={getLiturgicalDay(d(2026, 11, 28))}
+        dateISO="2026-11-28"
+        onDateChange={() => {}}
+        eveningAvailable
+        onEveningChange={onEveningChange}
+      />
+    );
+    fireEvent.click(screen.getByLabelText('Missa vespertina (liturgia do dia seguinte)'));
+    expect(onEveningChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <LiturgicalBanner
+        day={getLiturgicalDay(d(2026, 11, 28), { evening: true })}
+        dateISO="2026-11-28"
+        onDateChange={() => {}}
+        evening
+        eveningAvailable
+        onEveningChange={onEveningChange}
+      />
+    );
+    expect(screen.getByText('I Domingo do Advento')).toBeInTheDocument();
+    expect(screen.getByText(/missa vespertina$/)).toBeInTheDocument();
+
+    rerender(
+      <LiturgicalBanner
+        day={getLiturgicalDay(d(2026, 11, 4))}
+        dateISO="2026-11-04"
+        onDateChange={() => {}}
+        eveningAvailable={false}
+        onEveningChange={onEveningChange}
+      />
+    );
+    expect(screen.queryByLabelText('Missa vespertina (liturgia do dia seguinte)')).toBeNull();
   });
 });
 
