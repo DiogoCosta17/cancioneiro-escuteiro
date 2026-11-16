@@ -5,6 +5,7 @@ import {
   buildRestorePlan,
   parseBackupText,
   validateBackup,
+  toEventRow,
   type Backup,
   type CurrentState,
   type RestoreAdapter,
@@ -289,5 +290,54 @@ describe('applyRestorePlan', () => {
     const songCalls = calls.filter(c => c.table === 'songs');
     expect(songCalls).toHaveLength(2);
     expect(songCalls[1].rows[0]).not.toHaveProperty('capo');
+  });
+});
+
+describe('Missa vespertina nas cópias (migração 022)', () => {
+  const withEvening = (value: unknown) => {
+    const raw = rawBackup();
+    (raw.events as Record<string, unknown>[])[0].evening_mass = value;
+    return raw;
+  };
+
+  it('aceita true/false/null e rejeita outros valores', () => {
+    expect(parsed(withEvening(true)).events[0].evening_mass).toBe(true);
+    expect(parsed(withEvening(false)).events[0].evening_mass).toBe(false);
+    expect(parsed().events[0].evening_mass).toBeNull();
+    expect(validateBackup(withEvening('sim')).ok).toBe(false);
+  });
+
+  it('só envia o campo quando a cópia o tem; cópias antigas não mexem no valor atual', () => {
+    expect(toEventRow(parsed(withEvening(true)).events[0]).evening_mass).toBe(true);
+    expect(toEventRow(parsed(withEvening(false)).events[0])).toHaveProperty('evening_mass', false);
+    expect(toEventRow(parsed().events[0])).not.toHaveProperty('evening_mass');
+    expect(toEventRow(parsed(withEvening(true)).events[0], true, false)).not.toHaveProperty('evening_mass');
+
+    const current: CurrentState = {
+      songs: [],
+      events: [{ id: E1, title: 'Missa de Promessas', date: '2026-10-25', location: 'Igreja Matriz', evening_mass: true }],
+      eventSongs: [],
+    };
+    expect(buildRestorePlan(parsed(), current).events[0].changedFields).not.toContain('missa vespertina');
+    expect(buildRestorePlan(parsed(withEvening(false)), current).events[0].changedFields).toContain('missa vespertina');
+  });
+
+  it('repete sem a coluna se a base de dados não a tiver', async () => {
+    const backup = parsed(withEvening(true));
+    const plan = buildRestorePlan(backup, { songs: [], events: [], eventSongs: [] });
+    const eventCalls: Record<string, unknown>[][] = [];
+    const adapter: RestoreAdapter = {
+      async upsert(table, rows) {
+        if (table !== 'events') return { error: null };
+        eventCalls.push(rows);
+        const fails = rows.some(r => 'evening_mass' in r);
+        return { error: fails ? { message: "Could not find the 'evening_mass' column of 'events'" } : null };
+      },
+    };
+    const report = await applyRestorePlan(backup, plan, adapter);
+    expect(report.errorCount).toBe(0);
+    expect(eventCalls).toHaveLength(2);
+    expect(eventCalls[1][0]).not.toHaveProperty('evening_mass');
+    expect(eventCalls[1][0]).toHaveProperty('gospel_acclamation');
   });
 });

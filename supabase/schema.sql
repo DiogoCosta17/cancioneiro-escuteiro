@@ -52,6 +52,8 @@ create table public.events (
   prayers text,
   -- Versículo do Aleluia, mostrado por baixo do Aleluia na página do evento e na impressão
   gospel_acclamation text,
+  -- Missa vespertina (sábado à tarde, véspera de solenidade): celebra-se a liturgia do dia seguinte
+  evening_mass boolean not null default false,
   created_at timestamptz default timezone('utc'::text, now()) not null,
   constraint events_gospel_acclamation_length
     check (gospel_acclamation is null or length(gospel_acclamation) <= 600)
@@ -739,6 +741,12 @@ begin
 
     if old.gospel_acclamation is distinct from new.gospel_acclamation then
       changes := changes || jsonb_build_object('gospel_acclamation', jsonb_build_object('old', coalesce(old.gospel_acclamation, ''), 'new', coalesce(new.gospel_acclamation, '')));
+    end if;
+
+    if old.evening_mass is distinct from new.evening_mass then
+      changes := changes || jsonb_build_object('evening_mass', jsonb_build_object(
+        'old', case when old.evening_mass then 'Sim' else 'Não' end,
+        'new', case when new.evening_mass then 'Sim' else 'Não' end));
     end if;
 
     -- Sem diferenças nos campos acompanhados: não regista nada

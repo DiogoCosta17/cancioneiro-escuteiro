@@ -20,6 +20,12 @@ export function isValidISODate(value: string | null | undefined): value is strin
   return !Number.isNaN(d.getTime()) && toLocalISODate(d) === value;
 }
 
+/** Soma `days` dias a uma data 'YYYY-MM-DD' (sem problemas com a hora de verão). */
+export function shiftISODate(value: string, days: number): string {
+  const d = parseEventDate(value);
+  return toLocalISODate(new Date(d.getFullYear(), d.getMonth(), d.getDate() + days));
+}
+
 /** Próximo domingo a partir de `today` (inclusive: se hoje for domingo, devolve hoje). */
 export function nextSunday(today: Date): Date {
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());

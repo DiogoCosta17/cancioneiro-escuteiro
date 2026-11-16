@@ -11,7 +11,7 @@ import { normalizeSearchText, searchAndRankSongs } from '../lib/search-utils';
 import { LITURGICAL_MOMENTS } from '../lib/liturgical-moments';
 import { getLiturgicalDay, hasEveningMassOfNextDay } from '../lib/liturgical-calendar';
 import { buildMassPlan } from '../lib/mass-planner';
-import { isValidISODate, nextSunday, parseEventDate, toLocalISODate } from '../lib/dates';
+import { isValidISODate, nextSunday, parseEventDate, shiftISODate, toLocalISODate } from '../lib/dates';
 import { Church, Search, X, Music, Sparkles, ChevronUp, Info, BookMarked } from 'lucide-react';
 
 const PLANNER_OPEN_KEY = 'eucharist_planner_open';
@@ -54,9 +54,7 @@ export default function Eucharist() {
   const eveningAvailable = useMemo(() => hasEveningMassOfNextDay(targetDate), [targetDate]);
   const liturgicalDay = useMemo(() => getLiturgicalDay(targetDate, { evening }), [targetDate, evening]);
   // As leituras de uma missa vespertina são as do dia seguinte
-  const readingsDateISO = liturgicalDay.anticipated
-    ? toLocalISODate(new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate() + 1))
-    : dateISO;
+  const readingsDateISO = liturgicalDay.anticipated ? shiftISODate(dateISO, 1) : dateISO;
   const slots = useMemo(
     () => buildMassPlan(Array.isArray(songs) ? songs : [], liturgicalDay),
     [songs, liturgicalDay]

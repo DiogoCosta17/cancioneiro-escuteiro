@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useSongs } from '../../hooks/useSongs';
@@ -21,7 +21,8 @@ import {
   StickyNote
 } from 'lucide-react';
 import { getKeyName } from '../../lib/chords';
-import { toLocalISODate } from '../../lib/dates';
+import { parseEventDate, shiftISODate, toLocalISODate } from '../../lib/dates';
+import { getLiturgicalDay, hasEveningMassOfNextDay } from '../../lib/liturgical-calendar';
 import { getKeyOptions, mod12 } from '../../lib/key-picker';
 import {
   EVENT_SONG_NOTES_MAX,
@@ -38,6 +39,7 @@ import { ConfirmModal } from '../common/ConfirmModal';
 import { useUnsavedChangesWarning } from '../../hooks/useUnsavedChangesWarning';
 import { useActivityLogs } from '../../hooks/useActivityLogs';
 import { OfficialVerseLink } from '../eucharist/OfficialVerseLink';
+import { EventLiturgyInfo } from '../eucharist/EventLiturgyInfo';
 import { buildDuplicateTitle, suggestDuplicateDate } from './eventDuplicate';
 import { LITURGICAL_MOMENT_NAMES as LITURGICAL_MOMENTS } from '../../lib/liturgical-moments';
 
@@ -51,6 +53,8 @@ interface EventFormSnapshot {
   reader2: string;
   prayers: string;
   gospelAcclamation: string;
+  /** Missa vespertina (liturgia do dia seguinte), migração 022. */
+  eveningMass: boolean;
   songs: Partial<EventSong>[];
 }
 
@@ -65,6 +69,7 @@ const serializeEventForm = (f: EventFormSnapshot) =>
     f.reader2.trim(),
     f.prayers.trim(),
     f.gospelAcclamation.trim(),
+    f.eveningMass,
     f.songs.map(s => [s.song_id, s.moment_name || '', s.transpose_semitones ?? null, s.capo ?? null, (s.notes || '').trim()]),
   ]);
 
@@ -72,6 +77,7 @@ export interface EventDraft {
   title: string;
   date: string;
   gospelAcclamation?: string;
+  evening?: boolean;
   songs: Partial<EventSong>[];
 }
 
@@ -95,7 +101,13 @@ export function readMassPlanState(state: unknown): EventDraft | null {
       song: s.song && typeof s.song === 'object' ? (s.song as Song) : null,
     }));
   const gospelAcclamation = typeof plan.gospelAcclamation === 'string' ? plan.gospelAcclamation.slice(0, 600) : undefined;
-  return { title: plan.title.slice(0, 200), date: plan.date, songs, ...(gospelAcclamation ? { gospelAcclamation } : {}) };
+  return {
+    title: plan.title.slice(0, 200),
+    date: plan.date,
+    songs,
+    ...(gospelAcclamation ? { gospelAcclamation } : {}),
+    ...(plan.evening === true ? { evening: true } : {}),
+  };
 }
 
 // Mesma rota-componente para editar / criar / duplicar: remontar ao mudar de evento ou de modelo
@@ -131,6 +143,15 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
   const [gospelAcclamation, setGospelAcclamation] = useState(() => draft?.gospelAcclamation || '');
   // Valor guardado na BD (para saber se é preciso enviar a coluna ao apagar o versículo)
   const [savedAcclamation, setSavedAcclamation] = useState('');
+  // Missa vespertina: só conta se a data for véspera de domingo ou solenidade
+  const [eveningMass, setEveningMass] = useState(() => Boolean(draft?.evening));
+  const [savedEvening, setSavedEvening] = useState(false);
+  const eventDate = useMemo(() => parseEventDate(date), [date]);
+  const eveningAvailable = useMemo(() => hasEveningMassOfNextDay(eventDate), [eventDate]);
+  const effectiveEvening = eveningMass && eveningAvailable;
+  const liturgicalDay = useMemo(() => getLiturgicalDay(eventDate, { evening: effectiveEvening }), [eventDate, effectiveEvening]);
+  // Leituras (e versículo do Aleluia) da missa: as do dia seguinte numa missa vespertina
+  const readingsDateISO = liturgicalDay.anticipated ? shiftISODate(date, 1) : date;
   const [eventSongs, setEventSongs] = useState<Partial<EventSong>[]>(() => draft?.songs || []);
   const [initialSongs, setInitialSongs] = useState<Partial<EventSong>[]>([]);
   
@@ -145,12 +166,14 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
   // Ao duplicar, a referência continua a ser o formulário vazio: a cópia ainda não existe na BD.
   const [baseline, setBaseline] = useState(() =>
     serializeEventForm({
-      title: '', date: toLocalISODate(new Date()), location: '', reader1: '', psalmist: '', reader2: '', prayers: '', gospelAcclamation: '', songs: []
+      title: '', date: toLocalISODate(new Date()), location: '', reader1: '', psalmist: '', reader2: '', prayers: '', gospelAcclamation: '', eveningMass: false, songs: []
     })
   );
   const isDirty =
     !loading &&
-    serializeEventForm({ title, date, location, reader1, psalmist, reader2, prayers, gospelAcclamation, songs: eventSongs }) !== baseline;
+    serializeEventForm({
+      title, date, location, reader1, psalmist, reader2, prayers, gospelAcclamation, eveningMass: effectiveEvening, songs: eventSongs
+    }) !== baseline;
   const { confirmLeave } = useUnsavedChangesWarning(isDirty);
 
   const guardLink = (e: React.MouseEvent) => {
@@ -212,6 +235,8 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
         reader2: event.reader_2 || '',
         prayers: event.prayers || '',
         gospelAcclamation: event.gospel_acclamation || '',
+        // A cópia mantém-na (costuma ser o mesmo dia da semana)
+        eveningMass: Boolean(event.evening_mass),
         songs: formattedSongs
       };
 
@@ -245,6 +270,8 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
       setPrayers(loaded.prayers);
       setGospelAcclamation(loaded.gospelAcclamation);
       if (!isDuplicate) setSavedAcclamation(loaded.gospelAcclamation);
+      setEveningMass(loaded.eveningMass);
+      if (!isDuplicate) setSavedEvening(loaded.eveningMass);
       setEventSongs(loaded.songs);
 
       if (!isDuplicate) {
@@ -307,12 +334,19 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
       if (gospelAcclamation.trim() || savedAcclamation) {
         eventData.gospel_acclamation = gospelAcclamation.trim() || null;
       }
-      // Se a BD ainda não tiver alguma coluna: tenta sem o versículo e, por fim, só com os dados básicos
-      const { gospel_acclamation: _omit, ...withoutAcclamation } = eventData;
+      // Missa vespertina (migração 022): só enviada quando ligada ou é preciso desligá-la
+      if (effectiveEvening || savedEvening) {
+        eventData.evening_mass = effectiveEvening;
+      }
+      // Se a BD ainda não tiver alguma coluna: tenta sem a missa vespertina, depois sem o versículo
+      // e, por fim, só com os dados básicos
+      const { evening_mass: _omitEvening, ...withoutEvening } = eventData;
+      const { gospel_acclamation: _omit, ...withoutAcclamation } = withoutEvening;
       const attempts: Record<string, any>[] = [eventData];
+      if ('evening_mass' in eventData) attempts.push(withoutEvening);
       if ('gospel_acclamation' in eventData) attempts.push(withoutAcclamation);
       attempts.push({ title, date, location });
-      let acclamationDropped = false;
+      let savedPayload: Record<string, any> = eventData;
       const isMissingColumn = (err: { message?: string } | null) => Boolean(err?.message?.toLowerCase().includes('column'));
 
       for (let i = 0; i < attempts.length; i++) {
@@ -320,19 +354,24 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
         const isLast = i === attempts.length - 1;
         if (id) {
           const { error } = await supabase!.from('events').update(payload).eq('id', id);
-          if (!error) break;
+          if (!error) {
+            savedPayload = payload;
+            break;
+          }
           if (isLast || !isMissingColumn(error)) throw error;
         } else {
           const { data, error } = await supabase!.from('events').insert(payload).select().single();
           if (!error) {
             eventId = data.id;
             createdEventId = data.id;
+            savedPayload = payload;
             break;
           }
           if (isLast || !isMissingColumn(error)) throw error;
         }
-        if ('gospel_acclamation' in payload) acclamationDropped = true;
       }
+      const acclamationDropped = 'gospel_acclamation' in eventData && !('gospel_acclamation' in savedPayload);
+      const eveningDropped = 'evening_mass' in eventData && !('evening_mass' in savedPayload);
       
       // 2. Inserir primeiro os novos cânticos (se falhar, o repertório antigo mantém-se intacto)
       let insertedIds: string[] = [];
@@ -441,6 +480,9 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
       }
       if (settingsDropped) {
         window.alert('O evento foi guardado, mas o tom, o capo e as notas dos cânticos não: falta aplicar a migração 021 no Supabase.');
+      }
+      if (eveningDropped && effectiveEvening) {
+        window.alert('O evento foi guardado, mas a indicação de missa vespertina não: falta aplicar a migração 022 no Supabase.');
       }
 
       // Uma proposta da Eucaristia fica no histórico do browser: substituí-la evita que "voltar" a preencha outra vez
@@ -701,6 +743,18 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
               />
             </div>
 
+            <div className="md:col-span-2">
+              <EventLiturgyInfo
+                day={liturgicalDay}
+                readingsDateISO={readingsDateISO}
+                evening={effectiveEvening}
+                eveningAvailable={eveningAvailable}
+                onEveningChange={setEveningMass}
+                currentTitle={title}
+                onUseTitle={setTitle}
+              />
+            </div>
+
             {/* Leitores e Salmista */}
             <div className="md:col-span-2 pt-4 border-t border-gray-100 dark:border-zinc-800">
               <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
@@ -764,7 +818,7 @@ const EventEditorForm: React.FC<{ id?: string; fromId: string | null; draft?: Ev
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Aparece por baixo do Aleluia na página do evento e na impressão. Copia-o da liturgia da data do evento.
               </p>
-              <OfficialVerseLink dateISO={date} />
+              <OfficialVerseLink dateISO={readingsDateISO} />
             </div>
           </div>
         </div>

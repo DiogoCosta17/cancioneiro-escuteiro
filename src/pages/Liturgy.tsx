@@ -4,7 +4,7 @@ import { BookMarked, ChevronLeft, ChevronRight, Church, ExternalLink, Loader2, W
 import { LiturgicalBanner } from '../components/eucharist/LiturgicalBanner';
 import { useDailyReadings } from '../hooks/useDailyReadings';
 import { getLiturgicalDay } from '../lib/liturgical-calendar';
-import { isValidISODate, parseEventDate, toLocalISODate } from '../lib/dates';
+import { isValidISODate, parseEventDate, shiftISODate, toLocalISODate } from '../lib/dates';
 import type { ReadingKind } from '../lib/daily-readings';
 import {
   READINGS_SOURCE_NAME,
@@ -25,11 +25,6 @@ const KIND_STYLES: Record<ReadingKind, string> = {
 
 function validDate(value: string | null): string | null {
   return isValidISODate(value) ? value : null;
-}
-
-function shiftDate(dateISO: string, days: number): string {
-  const d = parseEventDate(dateISO);
-  return toLocalISODate(new Date(d.getFullYear(), d.getMonth(), d.getDate() + days));
 }
 
 export default function Liturgy() {
@@ -64,7 +59,7 @@ export default function Liturgy() {
       </div>
 
       <LiturgicalBanner day={day} dateISO={dateISO} onDateChange={setDate} dateLabel="Dia" fallbackTitle={data?.title}>
-        <button type="button" className={navButton} onClick={() => setDate(shiftDate(dateISO, -1))} aria-label="Dia anterior">
+        <button type="button" className={navButton} onClick={() => setDate(shiftISODate(dateISO, -1))} aria-label="Dia anterior">
           <ChevronLeft className="w-3.5 h-3.5" /> Anterior
         </button>
         {dateISO !== today && (
@@ -72,7 +67,7 @@ export default function Liturgy() {
             Hoje
           </button>
         )}
-        <button type="button" className={navButton} onClick={() => setDate(shiftDate(dateISO, 1))} aria-label="Dia seguinte">
+        <button type="button" className={navButton} onClick={() => setDate(shiftISODate(dateISO, 1))} aria-label="Dia seguinte">
           Seguinte <ChevronRight className="w-3.5 h-3.5" />
         </button>
         <Link to={`/eucaristia?data=${dateISO}`} className={navButton}>

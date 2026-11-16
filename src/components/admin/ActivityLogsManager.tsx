@@ -41,6 +41,7 @@ const FIELD_LABELS: Record<string, string> = {
   reader_2: '2ª Leitura',
   prayers: 'Orações / Preces',
   gospel_acclamation: 'Versículo do Aleluia',
+  evening_mass: 'Missa vespertina',
   songs: 'Cânticos do Evento',
   role: 'Cargo',
   name: 'Nome'

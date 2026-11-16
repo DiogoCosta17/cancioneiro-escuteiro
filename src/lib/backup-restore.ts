@@ -36,6 +36,8 @@ const SONG_KEYS = new Set([
 ]);
 const EVENT_KEYS = new Set([
   'id', 'title', 'date', 'location', 'reader_1', 'psalmist', 'reader_2', 'prayers', 'gospel_acclamation', 'created_at', 'event_songs',
+  // Migração 022: missa vespertina
+  'evening_mass',
 ]);
 const EVENT_SONG_KEYS = new Set([
   'id', 'event_id', 'song_id', 'moment_name', 'order_index', 'created_at',
@@ -77,6 +79,8 @@ export interface BackupEvent {
   reader_2: string | null;
   prayers: string | null;
   gospel_acclamation: string | null;
+  /** Missa vespertina; null em cópias anteriores à migração 022 (o restauro não mexe no valor atual). */
+  evening_mass: boolean | null;
   created_at: string | null;
   event_songs: BackupEventSong[];
 }
@@ -275,6 +279,11 @@ function validateEvent(raw: unknown, path: string, errs: ErrorCollector): Backup
   const reader_2 = readOptionalText(raw, 'reader_2', path, errs);
   const prayers = readOptionalText(raw, 'prayers', path, errs, 20000);
   const gospel_acclamation = readOptionalText(raw, 'gospel_acclamation', path, errs, 600);
+  let evening_mass: boolean | null = null;
+  if (raw.evening_mass !== undefined && raw.evening_mass !== null) {
+    if (typeof raw.evening_mass !== 'boolean') errs.add(`${path}.evening_mass`, 'tem de ser true, false ou null');
+    else evening_mass = raw.evening_mass;
+  }
   const created_at = readOptionalTimestamp(raw, 'created_at', path, errs);
 
   const event_songs: BackupEventSong[] = [];
@@ -289,7 +298,7 @@ function validateEvent(raw: unknown, path: string, errs: ErrorCollector): Backup
     });
   }
 
-  return { id, title, date, location, reader_1, psalmist, reader_2, prayers, gospel_acclamation, created_at, event_songs };
+  return { id, title, date, location, reader_1, psalmist, reader_2, prayers, gospel_acclamation, evening_mass, created_at, event_songs };
 }
 
 /** Valida estritamente o conteúdo (já convertido de JSON) de uma cópia de segurança. */
@@ -409,6 +418,7 @@ export interface CurrentEvent {
   reader_2?: string | null;
   prayers?: string | null;
   gospel_acclamation?: string | null;
+  evening_mass?: boolean | null;
 }
 
 export interface CurrentEventSong {
@@ -495,6 +505,7 @@ const EVENT_FIELD_LABELS: Record<string, string> = {
   reader_2: '2ª leitura',
   prayers: 'preces',
   gospel_acclamation: 'versículo do Aleluia',
+  evening_mass: 'missa vespertina',
 };
 
 const normText = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
@@ -521,6 +532,7 @@ function diffEvent(backup: BackupEvent, current: CurrentEvent): string[] {
   for (const key of ['location', 'reader_1', 'psalmist', 'reader_2', 'prayers', 'gospel_acclamation'] as const) {
     if (normText(backup[key]) !== normText(current[key])) changed.push(key);
   }
+  if (backup.evening_mass !== null && backup.evening_mass !== Boolean(current.evening_mass)) changed.push('evening_mass');
   return changed.map(f => EVENT_FIELD_LABELS[f] || f);
 }
 
@@ -674,7 +686,7 @@ export function toSongRow(song: BackupSong, includeCapo = true): Record<string, 
   return row;
 }
 
-export function toEventRow(event: BackupEvent, includeAcclamation = true): Record<string, unknown> {
+export function toEventRow(event: BackupEvent, includeAcclamation = true, includeEvening = true): Record<string, unknown> {
   const row: Record<string, unknown> = {
     id: event.id,
     title: event.title,
@@ -688,6 +700,8 @@ export function toEventRow(event: BackupEvent, includeAcclamation = true): Recor
   // Enviado sempre (null quando vazio) para que o restauro também possa limpar o versículo, tal como
   // o diff o conta. BDs sem a migração 020 não têm a coluna: aí é omitido (ver applyRestorePlan)
   if (includeAcclamation) row.gospel_acclamation = event.gospel_acclamation ?? null;
+  // Missa vespertina: só quando a cópia a tem (cópias antigas não mexem no valor atual); BDs sem a migração 022 omitem-na
+  if (includeEvening && event.evening_mass !== null) row.evening_mass = event.evening_mass;
   if (event.created_at) row.created_at = event.created_at;
   return row;
 }
@@ -798,6 +812,7 @@ export async function applyRestorePlan(
 
   // 2. Eventos
   let includeAcclamation = true;
+  let includeEvening = true;
   const eventItems: PendingItem[] = plan.events
     .filter(e => e.status !== 'unchanged' && eventsById.has(e.id))
     // Eventos existentes cuja única alteração são os cânticos não precisam de ser reenviados
@@ -806,11 +821,16 @@ export async function applyRestorePlan(
       id: e.id,
       label: e.title,
       status: e.status as Exclude<PlanStatus, 'unchanged'>,
-      row: () => toEventRow(eventsById.get(e.id)!, includeAcclamation),
+      row: () => toEventRow(eventsById.get(e.id)!, includeAcclamation, includeEvening),
     }));
   if (eventItems.length > 0) onProgress?.(`A restaurar ${eventItems.length} evento(s)...`);
   const eventResults = await upsertWithFallback(adapter, 'events', eventItems, message => {
     // Base de dados sem a coluna gospel_acclamation (migração 020 em falta): repetir sem esse campo
+    // Base de dados sem a coluna evening_mass (migração 022 em falta): repetir sem esse campo
+    if (includeEvening && message.toLowerCase().includes('evening_mass')) {
+      includeEvening = false;
+      return true;
+    }
     if (includeAcclamation && message.toLowerCase().includes('gospel_acclamation')) {
       includeAcclamation = false;
       return true;

@@ -345,6 +345,31 @@ describe('MassPlanner', () => {
     expect(screen.getByText('Cânticos: Entrada=b,Ofertório=o')).toBeInTheDocument();
   });
 
+  it('missa vespertina: o evento leva a indicação e o versículo oficial é o do dia seguinte', () => {
+    const day = getLiturgicalDay(d(2026, 11, 28), { evening: true });
+    const slots = buildMassPlan([song('a', 'Vem Senhor', ['Entrada', 'Advento'])], day);
+    function EveningProbe() {
+      const draft = readMassPlanState(useLocation().state);
+      return <p>Vespertina: {String(draft?.evening)} · {draft?.title}</p>;
+    }
+    render(
+      <SongListProvider>
+        <MemoryRouter initialEntries={['/eucaristia']}>
+          <Routes>
+            <Route path="/eucaristia" element={<MassPlanner slots={slots} day={day} dateISO="2026-11-28" />} />
+            <Route path="/admin/events/new" element={<EveningProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </SongListProvider>
+    );
+    expect(screen.getByRole('link', { name: /Ver o versículo oficial no liturgia.pt/ })).toHaveAttribute(
+      'href',
+      'https://www.liturgia.pt/liturgiadiaria/dia.php?data=2026-11-29'
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Criar evento com esta proposta/ }));
+    expect(screen.getByText('Vespertina: true · Missa — I Domingo do Advento')).toBeInTheDocument();
+  });
+
   it('adiciona os cânticos escolhidos à lista pessoal', () => {
     const day = getLiturgicalDay(d(2026, 11, 8));
     const slots = buildMassPlan([song('a', 'Entrada X', ['Entrada']), song('f', 'Final Y', ['Final'])], day);

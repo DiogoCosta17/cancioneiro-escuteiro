@@ -10,6 +10,7 @@ import { CandidateBadges } from './CandidateBadges';
 import { loadDailyReadings } from '../../lib/daily-readings';
 import { suggestMassSongs } from '../../lib/liturgy-ai';
 import { OfficialVerseLink } from './OfficialVerseLink';
+import { shiftISODate } from '../../lib/dates';
 
 /** Proposta enviada ao editor de eventos (ver `readMassPlanState` no EventEditor). */
 export interface MassPlanState {
@@ -17,6 +18,8 @@ export interface MassPlanState {
   date: string;
   songs: { song_id: string; moment_name: string; song: MassPlanSlot['candidates'][number]['song'] }[];
   gospelAcclamation?: string;
+  /** Missa vespertina: celebra a liturgia do dia seguinte. */
+  evening?: boolean;
 }
 
 interface MassPlannerProps {
@@ -39,6 +42,8 @@ export function MassPlanner({ slots, day, dateISO }: MassPlannerProps) {
   const [aiTheme, setAiTheme] = useState<string | null>(null);
   const [aiReasons, setAiReasons] = useState<Record<string, string>>({});
   const [acclamation, setAcclamation] = useState('');
+  // Numa missa vespertina as leituras são as do dia seguinte
+  const readingsDateISO = day.anticipated ? shiftISODate(dateISO, 1) : dateISO;
 
   useEffect(() => {
     setSelection(prev => {
@@ -75,7 +80,7 @@ export function MassPlanner({ slots, day, dateISO }: MassPlannerProps) {
     setAiLoading(true);
     try {
       // Leituras da data da missa que se está a preparar (não as de hoje)
-      const readings = await loadDailyReadings(dateISO);
+      const readings = await loadDailyReadings(readingsDateISO);
       const suggestion = await suggestMassSongs(readings, day, slots);
       touched.current = true;
       setAddedCount(null);
@@ -105,6 +110,7 @@ export function MassPlanner({ slots, day, dateISO }: MassPlannerProps) {
         song: candidate.song,
       })),
       ...(acclamation.trim() ? { gospelAcclamation: acclamation.trim() } : {}),
+      ...(day.anticipated ? { evening: true } : {}),
     };
     navigate('/admin/events/new', { state: { massPlan: state } });
   };
@@ -145,7 +151,7 @@ export function MassPlanner({ slots, day, dateISO }: MassPlannerProps) {
       {aiTheme && (
         <p className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-sm text-amber-900 dark:text-amber-200">
           <strong>Tema das leituras:</strong> {aiTheme}{' '}
-          <Link to={`/liturgia?data=${dateISO}`} className="underline whitespace-nowrap">Ver leituras</Link>
+          <Link to={`/liturgia?data=${readingsDateISO}`} className="underline whitespace-nowrap">Ver leituras</Link>
         </p>
       )}
 
@@ -211,7 +217,7 @@ export function MassPlanner({ slots, day, dateISO }: MassPlannerProps) {
             placeholder="Copia-o do liturgia.pt (opcional)."
             className="w-full bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-[#2d5016]"
           />
-          <OfficialVerseLink dateISO={dateISO} />
+          <OfficialVerseLink dateISO={readingsDateISO} />
         </div>
       )}
 

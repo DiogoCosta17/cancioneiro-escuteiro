@@ -58,6 +58,8 @@ export interface Event {
   prayers?: string | null;
   /** Versículo do Aleluia (aclamação ao Evangelho), migração 020. */
   gospel_acclamation?: string | null;
+  /** Missa vespertina: celebra a liturgia do dia seguinte (migração 022). */
+  evening_mass?: boolean | null;
   created_at: string;
 }
 
