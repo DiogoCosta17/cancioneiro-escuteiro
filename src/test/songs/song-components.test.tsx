@@ -5,10 +5,33 @@ import { MemoryRouter } from 'react-router-dom';
 import { SongCard } from '../../components/songs/SongCard';
 import { ChordDiagram } from '../../components/songs/ChordDiagram';
 import { TransposeControls } from '../../components/songs/TransposeControls';
+import { ChordLine } from '../../components/songs/ChordLine';
 import { SongListProvider } from '../../hooks/useSongList';
+import { parseChordProLine } from '../../lib/chordpro-parser';
 import type { Song } from '../../lib/types';
 
-describe('Tier 1: Core Song Components', () => {
+describe('ChordLine', () => {
+  it('acorde no fim da linha (sem letra a seguir) aparece e reserva o espaço da letra', () => {
+    const { container } = render(<ChordLine tokens={parseChordProLine('[Am]Sempre em [F]frente [C]')} />);
+    const chords = Array.from(container.querySelectorAll('.chord-text')).map((el) => el.textContent);
+    expect(chords).toEqual(['Am', 'F', 'C']);
+    expect(container.textContent).toContain('Sempre em');
+    // O último acorde não tem letra: fica um espaço invisível para manter o alinhamento
+    const lastLyric = container.querySelectorAll('.lyrics-text');
+    expect(lastLyric[lastLyric.length - 1].querySelector('.invisible')).not.toBeNull();
+  });
+
+  it('com os acordes ocultos mostra só a letra e omite linhas só de acordes', () => {
+    const { container } = render(<ChordLine tokens={parseChordProLine('[G]Sempre [D]alerta')} showChords={false} />);
+    expect(container.textContent).toBe('Sempre alerta');
+    expect(container.querySelector('.chord-text')).toBeNull();
+
+    const { container: instrumental } = render(<ChordLine tokens={parseChordProLine('[Am] [G] [F]')} showChords={false} />);
+    expect(instrumental).toBeEmptyDOMElement();
+  });
+});
+
+describe('Componentes da música (SongCard, ChordDiagram, TransposeControls)', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -18,7 +41,7 @@ describe('Tier 1: Core Song Components', () => {
     const testSong: Song = {
       id: 'song-alpha',
       title: 'Hino da Flor de Lis',
-      artist: 'Baden-Powell',
+      artist: 'Grupo de Teste',
       content: '[C]Partir para a aventura',
       tags: ['escutistas', 'pioneiros'],
       original_key: 'C',
@@ -37,7 +60,7 @@ describe('Tier 1: Core Song Components', () => {
       );
 
       expect(screen.getByText('Hino da Flor de Lis')).toBeInTheDocument();
-      expect(screen.getByText('Baden-Powell')).toBeInTheDocument();
+      expect(screen.getByText('Grupo de Teste')).toBeInTheDocument();
       expect(screen.getByText(/escutistas • pioneiros/)).toBeInTheDocument();
       expect(screen.queryByText('Cifrada')).not.toBeInTheDocument();
     });

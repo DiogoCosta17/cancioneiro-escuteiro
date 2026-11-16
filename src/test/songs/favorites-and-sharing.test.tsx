@@ -15,6 +15,7 @@ import {
 import { FavoriteButton } from '../../components/songs/FavoriteButton';
 import { ShareRepertoireModal } from '../../components/common/ShareRepertoireModal';
 import { SongShareButton } from '../../components/songs/SongShareButton';
+import { generateQrMatrix, generateQrSvgDataUrl } from '../../lib/qr-svg';
 
 beforeEach(() => {
   localStorage.clear();
@@ -130,7 +131,36 @@ describe('FavoriteButton', () => {
   });
 });
 
+describe('Código QR (gerado localmente, sem serviços externos)', () => {
+  it('gera uma matriz quadrada com os padrões de posição nos cantos', () => {
+    const matrix = generateQrMatrix('https://cancioneiro488.vercel.app/lista?share=1,2');
+    expect(matrix.length).toBeGreaterThanOrEqual(21);
+    expect(matrix.length).toBe(matrix[0].length);
+    for (const [row, col] of [[0, 0], [0, 6], [6, 0], [6, 6], [3, 3]]) {
+      expect(matrix[row][col]).toBe(true);
+    }
+  });
+
+  it('devolve um SVG como data URL', () => {
+    expect(generateQrSvgDataUrl('https://cancioneiro488.vercel.app').startsWith('data:image/svg+xml;utf8,')).toBe(true);
+  });
+});
+
 describe('Partilha', () => {
+  it('ShareRepertoireModal mostra o QR e o link a partilhar', () => {
+    render(
+      <ShareRepertoireModal
+        isOpen={true}
+        onClose={() => {}}
+        title="Missa de Domingo"
+        shareUrl="https://cancioneiro488.vercel.app/evento/123"
+        songCount={5}
+      />
+    );
+    expect(screen.getByTestId('repertoire-qr-svg')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://cancioneiro488.vercel.app/evento/123')).toBeInTheDocument();
+  });
+
   it('ShareRepertoireModal mantém "Link copiado!" quando o pai re-renderiza com onClose inline', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,

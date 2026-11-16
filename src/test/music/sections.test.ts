@@ -1,8 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { parseChord, extractUniqueChords } from '../../lib/chords';
-import { isSectionDirective, cleanAndAlignChordPro, parseChordPro } from '../../lib/chordpro-parser';
+import {
+  isSectionDirective,
+  cleanAndAlignChordPro,
+  parseChordPro,
+  getSectionBadgeClasses,
+} from '../../lib/chordpro-parser';
 
-describe('Tier 2: Portuguese Section Directives & Word Collisions', () => {
+describe('Secções em português e colisões com nomes de acordes', () => {
+  it('cada tipo de secção tem a sua cor', () => {
+    expect(getSectionBadgeClasses('Estrofe 1')).toContain('green');
+    expect(getSectionBadgeClasses('Refrão')).toContain('amber');
+    expect(getSectionBadgeClasses('Ponte')).toContain('purple');
+    expect(getSectionBadgeClasses('Pré-Refrão')).toContain('purple');
+    expect(getSectionBadgeClasses('Intro')).toContain('sky');
+    expect(getSectionBadgeClasses('Final')).toContain('rose');
+  });
+
   describe('Standard ChordPro Section Directives with Curly Braces', () => {
     it('accurately identifies curly brace directives without chord confusion', () => {
       expect(isSectionDirective('{Refrão}')).toBe('Refrão');
@@ -29,7 +43,7 @@ describe('Tier 2: Portuguese Section Directives & Word Collisions', () => {
   });
 
   describe('Section Directives in Square Brackets vs Real Chords', () => {
-    it('accurately identifies bracketed section directives (Feature 16)', () => {
+    it('accurately identifies bracketed section directives', () => {
       expect(isSectionDirective('[Refrão]')).toBe('Refrão');
       expect(isSectionDirective('[Intro]')).toBe('Intro');
       expect(isSectionDirective('[Estrofe 1]')).toBe('Estrofe 1');
@@ -50,7 +64,7 @@ describe('Tier 2: Portuguese Section Directives & Word Collisions', () => {
       expect(parsed[0].tokens).toEqual([]);
     });
 
-    it('distinguishes legitimate musical chords from Portuguese word collisions (Feature 15)', () => {
+    it('distinguishes legitimate musical chords from Portuguese word collisions', () => {
       // Valid chords
       expect(parseChord('C')).not.toBeNull();
       expect(parseChord('D')).not.toBeNull();
@@ -67,7 +81,7 @@ describe('Tier 2: Portuguese Section Directives & Word Collisions', () => {
       expect(parseChord('Salmo')).toBeNull();
     });
 
-    it('verifies non-chord repetition markers ([2x], [bis], [Solo]) are eliminated (Feature 18)', () => {
+    it('verifies non-chord repetition markers ([2x], [bis], [Solo]) are eliminated', () => {
       // Non-chord repetition markers and words are not chords
       expect(parseChord('2x')).toBeNull();
       expect(parseChord('3x')).toBeNull();

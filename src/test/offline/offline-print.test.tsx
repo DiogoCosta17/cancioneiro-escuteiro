@@ -8,7 +8,7 @@ import { saveCachedSongs } from '../../lib/offline-storage';
 import { setMockOnline } from '../setup';
 import type { Song } from '../../lib/types';
 
-describe('Tier 3: Offline Mode & Print Workflow (offline-print-workflow.test.tsx)', () => {
+describe('Impressão da lista sem rede', () => {
   const offlineCatalog: Song[] = [
     {
       id: 'off-1',
@@ -24,7 +24,7 @@ describe('Tier 3: Offline Mode & Print Workflow (offline-print-workflow.test.tsx
     {
       id: 'off-2',
       title: 'Oração da Noite',
-      artist: 'Pe. Hugo',
+      artist: 'Autor Exemplo',
       content: '[D]Fica connosco Senhor [A]esta noite',
       tags: ['escutistas', 'oracao'],
       original_key: 'D',

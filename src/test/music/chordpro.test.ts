@@ -14,7 +14,7 @@ import {
 import { parseChord, standardizeContentNotation } from '../../lib/chords';
 import { getChordDefinition } from '../../lib/guitar-chords';
 
-describe('Tier 1: ChordPro Parser Engine (chordpro-parser.ts)', () => {
+describe('ChordPro: leitura, limpeza e conversão', () => {
   describe('parseChordProLine', () => {
     it('parses a line with no chords as a single token', () => {
       const tokens = parseChordProLine('Caminhando pela floresta');
@@ -217,72 +217,67 @@ Sem roupa nas palavras`;
       expect(converted).toContain('Sem roupa [Em]nas [D]palavras');
     });
 
-    it('correctly converts the full song "Guarda-me Esta Noite" without split words or missing chords', () => {
+    it('converte uma cifra completa (acordes por cima da letra) sem partir palavras nem perder acordes', () => {
+      // Letra inventada: cada acorde cai a meio de uma palavra e tem de passar para o início dela
       const songTab = `Em
-A casa vai ruir
+Uma luz vai nascer
                D
-Se não for os ossos do nosso amor
+E já são os ossos do nosso trilho
               Am
-Se não formos corpos em furacão
+Se não formos corpos em marcha
          Em   D
-Sem roupa nas palavras
+Sem pausa nas palavras
 Em
-Porque o tempo é um fio
+Porque o caminho é longo
                 D
-Que pode romper hoje
+Que pode chegar hoje
              Am
-Sem que nós vivêssemos demais
+Sem que nós partíssemos cedo
                         Em
-Exaltássemos demais sem receios
+Acordássemos juntos sem receios
 
 D             C
-Como... se soubesses que amanhã
+Talvez, se soubesses o caminho
                      Am
-Não há um amanhã tão certo
+Não há um trilho tão certo
                Em
-Guarda-me esta noite
+Lembra-me esta noite
                D
-Guarda-me esta noite
+Lembra-me esta noite
     C
-E o universo ainda não tem
+E o horizonte ainda não tem
                         Am
-O que nos falta para sermos eternos
+O que nos falta para seguirmos juntos
                Em
-Guarda-me esta noite
+Lembra-me esta noite
                  D
-Escreve a nossa História
+Escreve a nossa canção
 
 ( Em   D   C   Em   D )`;
 
       const result = convertToChordPro(songTab);
 
-      // Verify no chords are left unconverted as plain text lines
+      // Nenhuma linha de acordes fica por converter
       expect(result).not.toMatch(/^\s+Em\s+D$/m);
-      expect(result).not.toContain('( Em   D   C   Em   D )');
       expect(result).toContain('( [Em]   [D]   [C]   [Em]   [D] )');
 
-      // Verify chords snap to word starts and never slice words
-      expect(result).toContain('[Em]A casa vai ruir');
-      expect(result).toContain('Se não for os [D]ossos do nosso amor');
+      expect(result).toContain('[Em]Uma luz vai nascer');
+      expect(result).toContain('E já são os [D]ossos do nosso trilho');
       expect(result).not.toContain('os os [D]sos');
-      expect(result).not.toContain('co[Am]rpos');
-      expect(result).toContain('[Am]corpos');
-      expect(result).toContain('Sem roupa [Em]nas [D]palavras');
-      expect(result).not.toContain('h[D]oje');
-      expect(result).toContain('[D]hoje');
-      expect(result).not.toContain('viv[Am]êssemos');
-      expect(result).toContain('[Am]vivêssemos');
-      expect(result).not.toContain('rece[Em]ios');
-      expect(result).toContain('[Em]receios');
-      expect(result).not.toContain('so[C]ubesses');
-      expect(result).toContain('[C]soubesses');
-      expect(result).toContain('Guarda-me esta [Em]noite');
-      expect(result).toContain('Guarda-me esta [D]noite');
-      expect(result).not.toContain('univ[C]erso');
-      expect(result).toContain('[C]universo');
-      expect(result).toContain('[Am]sermos');
-      expect(result).not.toContain('His[D]tória');
-      expect(result).toContain('[D]História');
+      expect(result).toContain('Se não formos [Am]corpos em marcha');
+      expect(result).toContain('Sem pausa [Em]nas [D]palavras');
+      expect(result).toContain('Que pode chegar [D]hoje');
+      expect(result).toContain('Sem que nós [Am]partíssemos cedo');
+      expect(result).toContain('Acordássemos juntos sem [Em]receios');
+      expect(result).toContain('[D]Talvez, se [C]soubesses o caminho');
+      expect(result).toContain('Não há um trilho tão [Am]certo');
+      expect(result).toContain('Lembra-me esta [Em]noite');
+      expect(result).toContain('Lembra-me esta [D]noite');
+      expect(result).toContain('E o [C]horizonte ainda não tem');
+      expect(result).toContain('O que nos falta para [Am]seguirmos juntos');
+      expect(result).toContain('Escreve a nossa [D]canção');
+      // Nenhum acorde ficou a meio de uma palavra
+      expect(result).not.toMatch(/[a-zà-ú]\[[^\]]+\][a-zà-ú]/i);
     });
 
     it('repairs impossible consonant-only syllable splits from OCR like "S[G]enhor", "pr[D]esente", and "Senho[G]r"', () => {
@@ -327,5 +322,17 @@ Um instrumento da Paz`;
       const toAlfabetica = standardizeContentNotation('[Sol]Senhor [Ré-]fazei de [Mim]mim', 'alfabetica');
       expect(toAlfabetica).toBe('[G]Senhor [Dm]fazei de [Em]mim');
     });
+  });
+});
+
+describe('ChordPro: entradas nulas ou inválidas', () => {
+  it('isChordLine, isChordToken e convertToChordPro não rebentam com valores que não são texto', () => {
+    for (const invalid of [null, undefined, '', '   ', 12345, true]) {
+      expect(isChordLine(invalid as unknown as string)).toBe(false);
+      expect(isChordToken(invalid as unknown as string)).toBe(false);
+    }
+    for (const invalid of [null, undefined, '', 42]) {
+      expect(convertToChordPro(invalid as unknown as string)).toBe('');
+    }
   });
 });

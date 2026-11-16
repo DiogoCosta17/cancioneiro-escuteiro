@@ -12,7 +12,7 @@ import type { Song, Event, EventSong } from '../../lib/types';
 const mockSong1: Song = {
   id: 'song-p1',
   title: 'Hino da Flor de Lis',
-  artist: 'Baden-Powell',
+  artist: 'Grupo de Teste',
   content: '{Refrão}\n[C]A flor de lis nos [G]guia',
   tags: ['escutistas'],
   original_key: 'C',
@@ -24,7 +24,7 @@ const mockSong1: Song = {
 const mockSong2: Song = {
   id: 'song-p2',
   title: 'Avante Escuteiros',
-  artist: 'Pe. Hugo',
+  artist: 'Autor Exemplo',
   content: '[D]Sempre alerta para [A]servir',
   tags: ['marcha'],
   original_key: 'D',
@@ -74,19 +74,26 @@ const mockEventSongs: EventSong[] = [
   },
 ];
 
+const mockUseEvent = vi.fn();
 vi.mock('../../hooks/useEvents', () => ({
-  useEvent: () => ({
-    event: mockEvent,
-    eventSongs: mockEventSongs,
-    loading: false,
-    error: null,
-  }),
+  useEvent: (...args: unknown[]) => mockUseEvent(...args),
 }));
 
-describe('Tier 1: Print Views (SongPrint, ListPrint, EventPrint)', () => {
+function renderEventPrint() {
+  return render(
+    <MemoryRouter initialEntries={['/evento/event-p1/print']}>
+      <Routes>
+        <Route path="/evento/:id/print" element={<EventPrint />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+describe('Impressão (SongPrint, ListPrint, EventPrint)', () => {
   beforeEach(() => {
     localStorage.clear();
     window.print = vi.fn();
+    mockUseEvent.mockReturnValue({ event: mockEvent, eventSongs: mockEventSongs, loading: false, error: null });
   });
 
   describe('SongPrint', () => {
@@ -100,7 +107,7 @@ describe('Tier 1: Print Views (SongPrint, ListPrint, EventPrint)', () => {
       );
 
       expect(await screen.findByText('Hino da Flor de Lis')).toBeInTheDocument();
-      expect(screen.getByText(/Baden-Powell/)).toBeInTheDocument();
+      expect(screen.getByText(/Grupo de Teste/)).toBeInTheDocument();
       expect(screen.getByText('Tom')).toBeInTheDocument();
       expect(screen.getByText(/A flor de lis nos/)).toBeInTheDocument();
     });
@@ -157,19 +164,38 @@ describe('Tier 1: Print Views (SongPrint, ListPrint, EventPrint)', () => {
   });
 
   describe('EventPrint', () => {
-    it('renders event header and assigned songs', async () => {
-      render(
-        <MemoryRouter initialEntries={['/evento/event-p1/print']}>
-          <Routes>
-            <Route path="/evento/:id/print" element={<EventPrint />} />
-          </Routes>
-        </MemoryRouter>
-      );
+    it('renders event header and assigned songs, and prints', async () => {
+      renderEventPrint();
 
       expect(await screen.findByText('Acampamento de Primavera 2026')).toBeInTheDocument();
       expect(screen.getByText('Parque de Campismo de Santa Cruz')).toBeInTheDocument();
       expect(screen.getByText('Hino da Flor de Lis')).toBeInTheDocument();
       expect(screen.getByText('Avante Escuteiros')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Imprimir/i }));
+      expect(window.print).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignora cânticos de músicas apagadas (null/undefined) e mostra o tom de cada música', async () => {
+      mockUseEvent.mockReturnValue({
+        event: mockEvent,
+        eventSongs: [
+          mockEventSongs[0],
+          { id: 'es-null', event_id: 'event-p1', song_id: 'apagada-1', moment_name: 'Salmo', order_index: 1, song: null as unknown as Song },
+          { id: 'es-undef', event_id: 'event-p1', song_id: 'apagada-2', moment_name: 'Aleluia', order_index: 2, song: undefined },
+          { ...mockEventSongs[1], order_index: 3 },
+        ],
+        loading: false,
+        error: null,
+      });
+      renderEventPrint();
+
+      expect(await screen.findByText('Acampamento de Primavera 2026')).toBeInTheDocument();
+      expect(screen.getByText('Hino da Flor de Lis')).toBeInTheDocument();
+      expect(screen.getByText('Avante Escuteiros')).toBeInTheDocument();
+      expect(screen.getByText(/2 músicas/i)).toBeInTheDocument();
+      expect(screen.getByText('Tom: Dó')).toBeInTheDocument();
+      expect(screen.getByText('Tom: Ré')).toBeInTheDocument();
     });
   });
 });

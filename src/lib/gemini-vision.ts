@@ -38,9 +38,11 @@ export function normalizeDetectedKey(rawKey: string, content: string = ''): stri
   const matches = content.match(/\[([^\]]+)\]/g);
   if (matches && matches.length > 0) {
     const firstChord = matches[0].replace(/[[\]]/g, '').trim().split('/')[0];
-    const isMinor = /m(?!aj)/i.test(firstChord) || firstChord.endsWith('-');
     const rootMatch = firstChord.match(/^([A-G]|d[óo]|r[ée]|mi|f[áa]|sol|l[áa]|si)(#|b|♯|♭)?/i);
     if (rootMatch) {
+      // Menor só quando o "m" minúsculo (ou "-") vem logo a seguir à fundamental: "C7M" e "Cmaj7" são maiores
+      const quality = firstChord.slice(rootMatch[0].length);
+      const isMinor = /^(?:m(?!aj)|min|-)/.test(quality);
       const rootStr = rootMatch[1].toLowerCase();
       const acc = (rootMatch[2] || '').replace('♯', '#').replace('♭', 'b');
       const root = SOLFEGE_MAP[rootStr] || rootStr.toUpperCase();
