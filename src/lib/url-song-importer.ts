@@ -240,13 +240,19 @@ function parseJsonStringLiteral(body: string): string {
   }
 }
 
-/** Converte texto "acordes por cima da letra" num ChordPro estruturado e limpo. */
-function textToChordPro(rawText: string): { content: string; detectedCapo: number | null; detectedKey: string } {
+/**
+ * Converte texto "acordes por cima da letra" num ChordPro estruturado e limpo.
+ * `exactColumns`: o texto vem de uma fonte monoespaçada e a coluna de cada acorde é a sílaba exata.
+ */
+function textToChordPro(
+  rawText: string,
+  exactColumns: boolean
+): { content: string; detectedCapo: number | null; detectedKey: string } {
   // Caracteres invisíveis (zero-width space no CifraClub) impedem o reconhecimento de "[Intro]" e acordes
-  const visibleText = rawText.replace(/[​-‍⁠﻿]/g, '');
+  const visibleText = rawText.replace(/[\u200B-\u200D\u2060\uFEFF]/g, '');
   const { cleanedText, detectedCapo, detectedKey } = stripTablatureAndFooters(visibleText);
   const withSections = normalizeSectionHeaders(cleanedText);
-  const converted = convertToChordPro(withSections);
+  const converted = convertToChordPro(withSections, { exactColumns });
   const structured = autoStructureStanzas(converted);
   return { content: cleanAndAlignChordPro(structured), detectedCapo, detectedKey };
 }
@@ -345,7 +351,7 @@ function extractUltimateGuitar(html: string, doc: Document): ExtractedSong | nul
     .replace(/\[\/?tab\]/gi, '')
     .replace(/\[ch\]([^[]*?)\[\/ch\]/gi, '$1');
 
-  const { content, detectedCapo, detectedKey } = textToChordPro(cleanedUg);
+  const { content, detectedCapo, detectedKey } = textToChordPro(cleanedUg, true);
   if (!capo && detectedCapo) capo = detectedCapo;
   if (!rawKey && detectedKey) rawKey = detectedKey;
 
@@ -472,7 +478,7 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): Extr
       .replace(/<[^>]+>/g, '');
     const rawPreText = decodeHtmlEntities(preHtml);
 
-    const { content, detectedCapo, detectedKey } = textToChordPro(rawPreText);
+    const { content, detectedCapo, detectedKey } = textToChordPro(rawPreText, true);
     if (!capo && detectedCapo) capo = detectedCapo;
     if (!rawKey && detectedKey) rawKey = detectedKey;
 
@@ -519,7 +525,7 @@ export function extractSongFromHtml(html: string, _sourceUrl: string = ''): Extr
       .replace(/\*\*([A-G][#b♯♭]?(?:m|maj|min|dim|aug|sus|add|[0-9/+()-])*)\*\*/g, '[$1]');
   }
 
-  const { content, detectedCapo, detectedKey } = textToChordPro(rawBodyText);
+  const { content, detectedCapo, detectedKey } = textToChordPro(rawBodyText, false);
   if (!capo && detectedCapo) capo = detectedCapo;
   if (!rawKey && detectedKey) rawKey = detectedKey;
 

@@ -234,7 +234,59 @@ function extractChordsWithPositions(chordLine: unknown): ChordPosition[] {
   return result;
 }
 
-function snapChordIndexToWord(lyricsLine: unknown, index: number): number {
+export interface ConvertToChordProOptions {
+  /**
+   * true quando o texto vem de uma fonte monoespaçada (sites de cifras: Ultimate Guitar, CifraClub, <pre>):
+   * a coluna do acorde é exatamente a sílaba onde muda, por isso um acorde a meio de uma palavra fica lá
+   * ("confias[G]te"). Por omissão (fotos/OCR, texto colado de fontes proporcionais) as colunas são
+   * aproximadas e o acorde recua para o início da palavra.
+   */
+  exactColumns?: boolean;
+}
+
+const VOWEL_RE = /[aeiouáàâãéêíóôõúü]/i;
+const LETTER_RE = /[A-Za-zÀ-ÖØ-öø-ÿ]/;
+// Pares de consoantes que nunca se separam e iniciam juntas a sílaba ("ro-cha", "ca-lhou", "nou-tra", "a-bra-ço")
+const INSEPARABLE_ONSETS = /^(?:ch|lh|nh|[bcdfgptv][lr])$/i;
+
+/**
+ * Posições (relativas à palavra) onde começa cada sílaba, pelas regras do português:
+ * dígrafos ch/lh/nh/qu/gu ficam juntos, consoante + l/r também ("tra", "bla"), e as restantes
+ * consoantes entre vogais separam-se deixando a última para a sílaba seguinte ("pas-sas-te", "en-ten-di").
+ */
+export function syllableStarts(word: string): number[] {
+  const lower = word.toLowerCase();
+  const isVowelAt = (i: number) => {
+    if (!VOWEL_RE.test(lower[i] || '')) return false;
+    // O "u" de "que/qui/gue/gui/qua" pertence ao início da sílaba, não é núcleo
+    if ((lower[i] === 'u' || lower[i] === 'ü') && /[qg]/.test(lower[i - 1] || '') && VOWEL_RE.test(lower[i + 1] || '')) {
+      return false;
+    }
+    return true;
+  };
+
+  const starts = [0];
+  let i = 0;
+  // Saltar o primeiro núcleo (a primeira sílaba começa sempre no início da palavra)
+  while (i < lower.length && !isVowelAt(i)) i++;
+  while (i < lower.length && isVowelAt(i)) i++;
+
+  while (i < lower.length) {
+    const consonantsStart = i;
+    while (i < lower.length && !isVowelAt(i)) i++;
+    if (i >= lower.length) break; // consoantes finais ficam na última sílaba
+    const consonants = lower.slice(consonantsStart, i).replace(/ü/g, 'u');
+    let onset = i - 1;
+    if (consonants.length >= 2 && INSEPARABLE_ONSETS.test(consonants.slice(-2))) onset = i - 2;
+    // "qu"/"gu" antes de vogal: o início da sílaba é o q/g
+    if (/[qg]u$/.test(consonants)) onset = i - 2;
+    starts.push(Math.max(consonantsStart, onset));
+    while (i < lower.length && isVowelAt(i)) i++;
+  }
+  return starts;
+}
+
+function snapChordIndexToWord(lyricsLine: unknown, index: number, exactColumns = false): number {
   if (!lyricsLine || typeof lyricsLine !== 'string') return index;
   if (index >= lyricsLine.length) return index;
 
@@ -256,6 +308,20 @@ function snapChordIndexToWord(lyricsLine: unknown, index: number): number {
   // Devido a fontes proporcionais ou espaçamento do editor, o acorde muitas vezes começa na 2ª ou 3ª letra.
   // Recua para o início da palavra para ancorar no início da palavra e NUNCA partir a palavra ao meio
   // (evita "co[Am]rpos", "h[D]oje", "viv[Am]êssemos", "so[C]ubesses", "no[Em]ite", "univ[C]erso", etc.)
+  // Com colunas exatas a posição é fiável: o acorde fica na sílaba onde a coluna cai, no início dessa
+  // sílaba (quem escreve a cifra alinha "por cima da sílaba", muitas vezes uma letra ao lado:
+  // "roc[G]ha" -> "ro[G]cha", "O[Am]nde" -> "[Am]Onde").
+  if (exactColumns) {
+    if (!LETTER_RE.test(lyricsLine[index])) return index;
+    let start = index;
+    while (start > 0 && LETTER_RE.test(lyricsLine[start - 1])) start--;
+    let end = index;
+    while (end < lyricsLine.length && LETTER_RE.test(lyricsLine[end])) end++;
+    const offset = index - start;
+    const syllableStart = syllableStarts(lyricsLine.slice(start, end)).filter((s) => s <= offset).pop() ?? 0;
+    return start + syllableStart;
+  }
+
   let wordStart = index;
   while (wordStart > 0 && lyricsLine[wordStart - 1] !== ' ') {
     wordStart--;
@@ -267,7 +333,7 @@ function snapChordIndexToWord(lyricsLine: unknown, index: number): number {
 /**
  * Merges a chord line with the lyrics line below it
  */
-function mergeChordsIntoLyrics(chordLine: unknown, lyricsLine: unknown): string {
+function mergeChordsIntoLyrics(chordLine: unknown, lyricsLine: unknown, exactColumns = false): string {
   const safeChordLine = typeof chordLine === 'string' ? chordLine : '';
   const safeLyricsLine = typeof lyricsLine === 'string' ? lyricsLine : '';
   const expandedLyrics = expandTabs(safeLyricsLine, 4);
@@ -279,7 +345,7 @@ function mergeChordsIntoLyrics(chordLine: unknown, lyricsLine: unknown): string 
   const usedWordStarts = new Set<number>();
 
   for (const { chord, index: rawIndex } of chords) {
-    let targetIndex = snapChordIndexToWord(expandedLyrics, rawIndex);
+    let targetIndex = snapChordIndexToWord(expandedLyrics, rawIndex, exactColumns);
     if (targetIndex !== rawIndex && usedWordStarts.has(targetIndex)) {
       // Já existe um acorde ancorado no início desta palavra (mudança de acorde a meio da palavra).
       // Mantém a posição original para não sobrepor ambos os acordes no início da mesma palavra.
@@ -352,8 +418,9 @@ function normalizeSectionTitle(raw: string): string {
 /**
  * Main converter: Takes traditional 2-line plain text and converts to ChordPro
  */
-export function convertToChordPro(text: unknown): string {
+export function convertToChordPro(text: unknown, options: ConvertToChordProOptions = {}): string {
   if (!text || typeof text !== 'string') return '';
+  const exactColumns = options.exactColumns === true;
 
   // NFC: letras acentuadas em NFD (ex: texto colado do macOS) ocupam 2 colunas e desalinham os acordes
   const lines = text.normalize('NFC').split(/\r?\n/);
@@ -411,7 +478,7 @@ export function convertToChordPro(text: unknown): string {
       // Check if next line is a lyrics line
       if (!looksInstrumental && nextLine !== null && nextLine.trim() !== '' && !isChordLine(nextLine)) {
         // Merge chords into next line
-        const merged = mergeChordsIntoLyrics(current, nextLine);
+        const merged = mergeChordsIntoLyrics(current, nextLine, exactColumns);
         result.push(merged);
         i++; // skip next line because it was consumed
       } else {

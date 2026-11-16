@@ -10,6 +10,7 @@ import {
   convertToChordPro,
   isChordLine,
   isChordToken,
+  syllableStarts,
 } from '../../lib/chordpro-converter';
 import { parseChord, standardizeContentNotation } from '../../lib/chords';
 import { getChordDefinition } from '../../lib/guitar-chords';
@@ -334,5 +335,41 @@ describe('ChordPro: entradas nulas ou inválidas', () => {
     for (const invalid of [null, undefined, '', 42]) {
       expect(convertToChordPro(invalid as unknown as string)).toBe('');
     }
+  });
+});
+
+describe('ChordPro: colunas exatas (sites de cifras com texto monoespaçado)', () => {
+  it('divide as palavras em sílabas segundo as regras do português', () => {
+    const syllables = (word: string) => {
+      const starts = syllableStarts(word);
+      return starts.map((s, i) => word.slice(s, starts[i + 1]));
+    };
+    expect(syllables('aqui')).toEqual(['a', 'qui']);
+    expect(syllables('rocha')).toEqual(['ro', 'cha']);
+    expect(syllables('calhou')).toEqual(['ca', 'lhou']);
+    expect(syllables('caminhar')).toEqual(['ca', 'mi', 'nhar']);
+    expect(syllables('noutra')).toEqual(['nou', 'tra']);
+    expect(syllables('abraço')).toEqual(['a', 'bra', 'ço']);
+    expect(syllables('Passaste')).toEqual(['Pas', 'sas', 'te']);
+    expect(syllables('entendi')).toEqual(['en', 'ten', 'di']);
+    expect(syllables('guerra')).toEqual(['guer', 'ra']);
+    expect(syllables('Onde')).toEqual(['On', 'de']);
+    expect(syllables('mar')).toEqual(['mar']);
+  });
+
+  it('mantém o acorde na sílaba onde a coluna cai, em vez de o puxar para o início da palavra', () => {
+    const tab = 'G           D\nSempre a caminhar';
+    // Fotos/texto proporcional (por omissão): colunas aproximadas, o acorde recua para o início da palavra
+    expect(convertToChordPro(tab)).toBe('[G]Sempre a [D]caminhar');
+    // Fonte monoespaçada: o D está por cima do "i" de "caminhar" -> sílaba "mi"
+    expect(convertToChordPro(tab, { exactColumns: true })).toBe('[G]Sempre a ca[D]minhar');
+  });
+
+  it('acordes uma letra ao lado da sílaba vão para o início dessa sílaba', () => {
+    const convert = (tab: string) => convertToChordPro(tab, { exactColumns: true });
+    expect(convert(' G\nOnde vamos')).toBe('[G]Onde vamos'); // "O|nde" -> sílaba "On"
+    expect(convert('     G\nEis aqui')).toBe('Eis a[G]qui'); // por cima do "u" de "aqui"
+    expect(convert('   G   D\nPassaste')).toBe('Pas[G]sas[D]te');
+    expect(convert('      C\nVamos juntos')).toBe('Vamos [C]juntos'); // espaço antes da palavra
   });
 });

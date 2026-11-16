@@ -95,6 +95,21 @@ describe('url-song-importer: extração', () => {
     expect(extracted.artist).toBe('Autor Exemplo');
   });
 
+  it('mantém os acordes na sílaba certa (colunas exatas), mesmo a meio das palavras', () => {
+    const payload = {
+      store: {
+        page: {
+          data: {
+            tab: { song_name: 'Canção Teste', artist_name: 'Grupo Teste', type: 'Chords' },
+            tab_view: { wiki_tab: { content: '[ch]G[/ch]           [ch]D[/ch]\nSempre a caminhar' } },
+          },
+        },
+      },
+    };
+    const extracted = extractSongFromHtml(ugPage(payload), 'https://example.com/cifra');
+    expect(extracted.chordProContent).toContain('[G]Sempre a ca[D]minhar');
+  });
+
   it('encontra o JSON do Ultimate Guitar dentro de um <script> quando não há js-store', () => {
     const json = JSON.stringify({
       tab: { song_name: 'Canção do Script', artist_name: 'Grupo Teste', tonality_name: 'C' },
@@ -133,13 +148,13 @@ Linha de teste aqui
 
   it('ignora caracteres invisíveis do CifraClub e não lê "C7M" como tom menor', () => {
     const html = `<html><head><title>Canção Teste - Grupo Teste - Cifra Club</title></head><body>
-<h1>Canção Teste</h1><pre>​[Intro] <b>C7M</b>  <b>Am7</b>  <b>Bm7</b>  <b>Em</b>
+<h1>Canção Teste</h1><pre>\u200B[Intro] <b>C7M</b>  <b>Am7</b>  <b>Bm7</b>  <b>Em</b>
 
 <b>C7M</b>               <b>Am7</b>
 Linha de letra de teste
 </pre></body></html>`;
     const extracted = extractSongFromHtml(html, 'https://example.com/cifra');
-    expect(extracted.chordProContent).not.toContain('​');
+    expect(extracted.chordProContent).not.toContain('\u200B');
     expect(extracted.chordProContent).toContain('{Intro}');
     expect(extracted.chordProContent).not.toContain('[Intro]');
     expect(extracted.key).toBe('C');
